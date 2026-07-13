@@ -1,0 +1,100 @@
+{
+  "name": "web-source-inspector-vscode",
+  "displayName": "Web Source Inspector",
+  "description": "Open Vue template sources from Vite and Webpack development pages.",
+  "version": "0.1.0",
+  "publisher": "web-source-inspector",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other", "Debuggers"],
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited"
+    }
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:sourceInspector.connectSession",
+    "onCommand:sourceInspector.chooseSession",
+    "onCommand:sourceInspector.toggleBrowserSelectMode",
+    "onCommand:sourceInspector.openLastSelection",
+    "onCommand:sourceInspector.chooseSourceCandidate",
+    "onCommand:sourceInspector.showDiagnostics",
+    "onCommand:sourceInspector.disconnect",
+    "onCommand:sourceInspector.enableProject",
+    "onCommand:sourceInspector.viewIntegrationPlan",
+    "onCommand:sourceInspector.runDoctor",
+    "onCommand:sourceInspector.disableProject"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "sourceInspector.enableProject", "title": "Source Inspector: Enable Project" },
+      { "command": "sourceInspector.viewIntegrationPlan", "title": "Source Inspector: View Integration Plan" },
+      { "command": "sourceInspector.runDoctor", "title": "Source Inspector: Run Doctor" },
+      { "command": "sourceInspector.disableProject", "title": "Source Inspector: Disable Project" },
+      { "command": "sourceInspector.connectSession", "title": "Source Inspector: Connect Session" },
+      { "command": "sourceInspector.chooseSession", "title": "Source Inspector: Choose Session/Tab" },
+      { "command": "sourceInspector.toggleBrowserSelectMode", "title": "Source Inspector: Toggle Browser Select Mode" },
+      { "command": "sourceInspector.openLastSelection", "title": "Source Inspector: Open Last Selection" },
+      { "command": "sourceInspector.chooseSourceCandidate", "title": "Source Inspector: Choose Source Candidate" },
+      { "command": "sourceInspector.showDiagnostics", "title": "Source Inspector: Show Diagnostics" },
+      { "command": "sourceInspector.disconnect", "title": "Source Inspector: Disconnect" }
+    ],
+    "configuration": {
+      "title": "Web Source Inspector",
+      "properties": {
+        "sourceInspector.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect the only matching local development session."
+        },
+        "sourceInspector.autoClaimFocusedWindow": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow the focused editor window to claim a matching session."
+        },
+        "sourceInspector.openMode": {
+          "type": "string",
+          "enum": ["permanent", "preview"],
+          "default": "permanent"
+        },
+        "sourceInspector.revealPosition": {
+          "type": "string",
+          "enum": ["center", "centerIfOutside", "top"],
+          "default": "centerIfOutside"
+        },
+        "sourceInspector.enableContextRelocation": {
+          "type": "boolean",
+          "default": true
+        },
+        "sourceInspector.debugLog": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "build:e2e": "tsup e2e/run.ts e2e/suite.ts --no-config --format cjs --platform node --external vscode --external @vscode/test-electron --sourcemap --out-dir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:e2e": "pnpm run build && pnpm run build:e2e && node dist/run.js",
+    "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository --out web-source-inspector.vsix"
+  },
+  "devDependencies": {
+    "@web-source-inspector/protocol": "workspace:*",
+    "@types/node": "24.3.1",
+    "@types/vscode": "1.90.0",
+    "@types/ws": "8.18.1",
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "3.6.0",
+    "tsup": "catalog:",
+    "vitest": "3.2.4",
+    "ws": "catalog:"
+  }
+}

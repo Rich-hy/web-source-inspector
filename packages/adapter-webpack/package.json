@@ -1,0 +1,55 @@
+{
+  "name": "@web-source-inspector/adapter-webpack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Webpack 4/5 adapter for Web Source Inspector.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./loader": {
+      "types": "./dist/loader.d.ts",
+      "import": "./dist/loader.js"
+    }
+  },
+  "files": [
+    "dist",
+    "fixtures/README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/loader.ts --format esm --target node16 --dts --sourcemap --clean",
+    "test": "vitest run --root ../.. --config packages/adapter-webpack/vitest.config.ts --configLoader runner",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@web-source-inspector/compiler-core": "workspace:*",
+    "@web-source-inspector/dev-session-core": "workspace:*",
+    "@web-source-inspector/protocol": "workspace:*",
+    "@web-source-inspector/runtime": "workspace:*",
+    "@web-source-inspector/transform-vue": "workspace:*",
+    "magic-string": "catalog:",
+    "ws": "catalog:"
+  },
+  "peerDependencies": {
+    "vue": ">=2.6.0",
+    "vue-loader": ">=15.0.0 <18.0.0",
+    "webpack": ">=4.0.0 <6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vue": { "optional": true },
+    "vue-loader": { "optional": true },
+    "webpack": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "@types/ws": "8.18.1",
+    "@vue/compiler-dom": "catalog:",
+    "@vue/compiler-sfc": "catalog:",
+    "tsup": "catalog:"
+  }
+}

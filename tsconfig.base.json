@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@web-source-inspector/protocol": ["packages/protocol/src/index.ts"],
+      "@web-source-inspector/compiler-core": ["packages/compiler-core/src/index.ts"],
+      "@web-source-inspector/transform-vue": ["packages/transform-vue/src/index.ts"],
+      "@web-source-inspector/runtime": ["packages/runtime/src/index.ts"],
+      "@web-source-inspector/dev-session-core": ["packages/dev-session-core/src/index.ts"],
+      "@web-source-inspector/init-core": ["packages/init-core/src/index.ts"],
+      "@web-source-inspector/adapter-webpack": ["packages/adapter-webpack/src/index.ts"],
+      "@web-source-inspector/adapter-webpack/loader": ["packages/adapter-webpack/src/loader.ts"],
+      "@web-source-inspector/vite-plugin": ["packages/vite-plugin/src/index.ts"]
+    },
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "useDefineForClassFields": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  }
+}

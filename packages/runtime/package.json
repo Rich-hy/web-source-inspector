@@ -1,0 +1,28 @@
+{
+  "name": "@web-source-inspector/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-side DOM inspector runtime for Web Source Inspector development pages.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. packages/runtime/src"
+  },
+  "dependencies": {
+    "@web-source-inspector/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "catalog:"
+  }
+}

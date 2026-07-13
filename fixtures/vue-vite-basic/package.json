@@ -1,0 +1,20 @@
+{
+  "name": "@web-source-inspector/fixture-basic",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "catalog:"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "catalog:",
+    "web-source-inspector": "workspace:*",
+    "vite": "catalog:",
+    "vue-tsc": "2.2.12"
+  }
+}

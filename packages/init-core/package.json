@@ -1,0 +1,31 @@
+{
+  "name": "@web-source-inspector/init-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project detection, AST integration planning, transactional apply/remove, and diagnostics.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --target node16 --dts --sourcemap --clean",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babel/parser": "7.28.4",
+    "recast": "0.23.11",
+    "semver": "7.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "@types/semver": "7.7.0",
+    "tsup": "catalog:"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "adapter": "webpack-vue3",
+  "configFileBaseDigests": {
+    "webpack.config.cjs": "sha256:4f3043090438162d5d11447a07f66465033f31f42fcc29c58f1c5d4e042e0cd5"
+  },
+  "configFileOwnership": {
+    "webpack.config.cjs": "reused"
+  },
+  "configFiles": [
+    "webpack.config.cjs"
+  ],
+  "configModules": {
+    "webpack.config.cjs": "commonjs"
+  },
+  "nodes": [
+    {
+      "configPath": "webpack.config.cjs",
+      "details": {
+        "binding": "WebSourceInspectorWebpackPlugin",
+        "exported": "WebSourceInspectorWebpackPlugin"
+      },
+      "fingerprint": "sha256:2f5def896db7d0e65e9f6f61e2eea919cdda383efd53c20a11ef5635a6a8247f",
+      "kind": "import",
+      "ownership": "created"
+    },
+    {
+      "configPath": "webpack.config.cjs",
+      "details": {
+        "binding": "WebSourceInspectorWebpackPlugin"
+      },
+      "fingerprint": "sha256:715c19a937b05d65039825fe6be91a970e375569bc076076d810804df2ebafd6",
+      "kind": "plugin",
+      "ownership": "created"
+    },
+    {
+      "configPath": "webpack.config.cjs",
+      "details": {
+        "action": "inserted-before-vue-loader",
+        "binding": "WebSourceInspectorWebpackPlugin"
+      },
+      "fingerprint": "sha256:83de22c23427c496611c5f3dec513df786455ed1a1932f7b00586ce3339dd231",
+      "kind": "loader",
+      "ownership": "created"
+    },
+    {
+      "configPath": "webpack.config.cjs",
+      "details": {
+        "binding": "createWebSourceInspectorBrowserMiddleware",
+        "exported": "createWebSourceInspectorBrowserMiddleware"
+      },
+      "fingerprint": "sha256:385042250907da205eb5b7dc336c1b07ccd969ad8354e66f8548023dc99c7483",
+      "kind": "import",
+      "ownership": "created"
+    },
+    {
+      "configPath": "webpack.config.cjs",
+      "details": {
+        "binding": "createWebSourceInspectorBrowserMiddleware",
+        "hookName": "setupMiddlewares"
+      },
+      "fingerprint": "sha256:170e7890e77bdf57b7ead31a9f079d95b4a8890723c8520af60f7f92d504404a",
+      "kind": "transport-hook",
+      "ownership": "created"
+    }
+  ],
+  "package": {
+    "name": "web-source-inspector",
+    "version": "0.1.0"
+  },
+  "profile": {
+    "bundler": "webpack",
+    "vueLoaderVersion": "17.4.2",
+    "vueVersion": "3.5.39",
+    "webpackVersion": "5.108.4"
+  },
+  "schemaVersion": 1,
+  "stateFile": {
+    "fingerprint": "sha256:66dfdeb0979a38bcb3587fd17e0a5ff1931df58f1eca4aa967fa52ea4ef0222d",
+    "ownership": "created"
+  }
+}

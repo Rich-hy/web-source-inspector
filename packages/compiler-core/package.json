@@ -1,0 +1,28 @@
+{
+  "name": "@web-source-inspector/compiler-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Source identifiers, records, manifests, digests, paths, and candidate resolution for Web Source Inspector.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@web-source-inspector/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "tsup": "catalog:"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "@web-source-inspector/transform-vue",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vue SFC source transforms and marker injection for Web Source Inspector.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "test": "vitest run --root ../.. --config packages/transform-vue/vitest.config.ts --configLoader runner",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@web-source-inspector/compiler-core": "workspace:*",
+    "@web-source-inspector/protocol": "workspace:*",
+    "magic-string": "catalog:"
+  },
+  "peerDependencies": {
+    "@vue/compiler-dom": ">=3.2.0",
+    "@vue/compiler-sfc": ">=3.2.0",
+    "vue": ">=2.6.0",
+    "vue-template-compiler": "^2.6.0"
+  },
+  "peerDependenciesMeta": {
+    "@vue/compiler-dom": { "optional": true },
+    "@vue/compiler-sfc": { "optional": true },
+    "vue": { "optional": true },
+    "vue-template-compiler": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "@vue/compiler-dom": "catalog:",
+    "@vue/compiler-sfc": "catalog:",
+    "tsup": "catalog:"
+  }
+}

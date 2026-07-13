@@ -1,0 +1,39 @@
+{
+  "name": "@web-source-inspector/vite-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vite plugin connecting Vue source transforms, the browser inspector, and the local IDE bridge.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "test": "vitest run --root ../.. --config packages/vite-plugin/vitest.config.ts --configLoader runner",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@web-source-inspector/compiler-core": "workspace:*",
+    "@web-source-inspector/dev-session-core": "workspace:*",
+    "@web-source-inspector/protocol": "workspace:*",
+    "@web-source-inspector/runtime": "workspace:*",
+    "@web-source-inspector/transform-vue": "workspace:*"
+  },
+  "peerDependencies": {
+    "vite": ">=2.9.0 <7"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "@types/ws": "8.18.1",
+    "tsup": "catalog:",
+    "vite": "catalog:",
+    "ws": "catalog:"
+  }
+}

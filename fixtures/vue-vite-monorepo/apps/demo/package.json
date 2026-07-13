@@ -1,0 +1,21 @@
+{
+  "name": "@web-source-inspector/fixture-monorepo-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@web-source-inspector/fixture-monorepo-ui": "workspace:*",
+    "vue": "catalog:"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "catalog:",
+    "@web-source-inspector/vite-plugin": "workspace:*",
+    "vite": "catalog:",
+    "vue-tsc": "2.2.12"
+  }
+}

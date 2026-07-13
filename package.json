@@ -1,0 +1,36 @@
+{
+  "name": "web-source-inspector-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vue source inspector for VS Code and Cursor",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20.19.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "build:libs": "pnpm --filter @web-source-inspector/protocol --filter @web-source-inspector/compiler-core --filter @web-source-inspector/transform-vue --filter @web-source-inspector/runtime --filter @web-source-inspector/dev-session-core --filter @web-source-inspector/init-core --filter @web-source-inspector/vite-plugin build",
+    "build:package": "pnpm --filter web-source-inspector build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "pretest": "pnpm run build:libs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm run test:e2e:browser && pnpm run test:e2e:webpack && pnpm run test:e2e:extension",
+    "test:e2e:browser": "playwright test",
+    "test:e2e:webpack": "playwright test --config playwright.webpack.config.ts",
+    "test:e2e:extension": "pnpm --filter web-source-inspector-vscode test:e2e",
+    "dev:basic": "pnpm run build:package && pnpm --filter @web-source-inspector/fixture-basic dev",
+    "serve:e2e": "pnpm run build:package && pnpm --filter @web-source-inspector/fixture-basic dev --host 127.0.0.1 --port 41731",
+    "package:npm": "pnpm --filter web-source-inspector pack",
+    "package:vsix": "pnpm --filter web-source-inspector-vscode package"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1",
+    "@types/node": "24.3.1",
+    "happy-dom": "20.10.6",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}

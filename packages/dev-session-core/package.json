@@ -1,0 +1,32 @@
+{
+  "name": "@web-source-inspector/dev-session-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bundler-neutral browser routing, IDE bridge, and local development session lifecycle.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --target node16 --dts --sourcemap --clean",
+    "test": "vitest run --root ../.. --config packages/dev-session-core/vitest.config.ts --configLoader runner",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@web-source-inspector/compiler-core": "workspace:*",
+    "@web-source-inspector/protocol": "workspace:*",
+    "ws": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "@types/ws": "8.18.1",
+    "tsup": "catalog:"
+  }
+}

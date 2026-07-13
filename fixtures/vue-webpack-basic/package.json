@@ -1,0 +1,19 @@
+{
+  "name": "@web-source-inspector/fixture-webpack-basic",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "webpack serve --config webpack.config.cjs",
+    "build": "webpack --config webpack.config.cjs"
+  },
+  "dependencies": {
+    "vue": "3.5.39"
+  },
+  "devDependencies": {
+    "vue-loader": "17.4.2",
+    "web-source-inspector": "workspace:*",
+    "webpack": "5.108.4",
+    "webpack-cli": "5.1.4",
+    "webpack-dev-server": "4.15.2"
+  }
+}
