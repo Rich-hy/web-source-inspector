@@ -21,10 +21,17 @@ export interface ViteBrowserClient {
 }
 
 function viteRemoteAddress(client: ViteBrowserClient): string | null {
-  return client.socket?._socket?.remoteAddress
-    ?? client.socket?.remoteAddress
-    ?? client._socket?.remoteAddress
-    ?? null;
+  const candidates = [
+    client.socket?._socket?.remoteAddress,
+    client.socket?.remoteAddress,
+    client._socket?.remoteAddress,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function viteClientIsOpen(client: ViteBrowserClient): boolean {

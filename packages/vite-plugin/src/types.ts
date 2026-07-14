@@ -1,5 +1,8 @@
 import type { ButtonPosition } from '@web-source-inspector/runtime';
 import type { VueCompilerAdapter } from '@web-source-inspector/transform-vue';
+import type { BrowserAccessMode } from '@web-source-inspector/dev-session-core';
+
+export type { BrowserAccessMode } from '@web-source-inspector/dev-session-core';
 
 export interface WebSourceInspectorAssets {
   /** 公开包可注入已编译的 Browser Runtime ESM 字符串。 */
@@ -15,6 +18,9 @@ export interface WebSourceInspectorOptions {
   include?: Array<string | RegExp>;
   exclude?: Array<string | RegExp>;
   bridge?: boolean;
+  /** Browser 连接的地址授权范围；same-machine 不允许其它设备。 */
+  browserAccess?: BrowserAccessMode;
+  /** @deprecated 请改用 browserAccess；此选项不支持远端设备。 */
   remoteBrowser?: false;
   debugLog?: boolean;
   /** 高级集成可注入 bundler 实际使用的 Vue compiler。 */
@@ -34,7 +40,7 @@ export interface ResolvedInspectorOptions {
   include: Array<string | RegExp>;
   exclude: Array<string | RegExp>;
   bridge: boolean;
-  remoteBrowser: boolean;
+  browserAccess: BrowserAccessMode;
   debugLog: boolean;
   compiler?: VueCompilerAdapter;
   ui: {
@@ -47,6 +53,14 @@ export interface ResolvedInspectorOptions {
 }
 
 export function resolveInspectorOptions(options: WebSourceInspectorOptions = {}): ResolvedInspectorOptions {
+  const remoteBrowser = (options as { remoteBrowser?: unknown }).remoteBrowser;
+  if (remoteBrowser === true) {
+    throw new Error('REMOTE_BROWSER_UNSUPPORTED');
+  }
+  const browserAccess = options.browserAccess ?? 'same-machine';
+  if (browserAccess !== 'loopback' && browserAccess !== 'same-machine') {
+    throw new Error('INVALID_BROWSER_ACCESS');
+  }
   const uiOptions = typeof options.ui === 'object' ? options.ui : {};
   return {
     enabled: options.enabled ?? true,
@@ -55,7 +69,7 @@ export function resolveInspectorOptions(options: WebSourceInspectorOptions = {})
     include: options.include || [],
     exclude: options.exclude || [],
     bridge: options.bridge ?? true,
-    remoteBrowser: false,
+    browserAccess,
     debugLog: options.debugLog ?? false,
     compiler: options.compiler,
     ui: {

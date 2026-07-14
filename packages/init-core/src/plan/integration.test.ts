@@ -180,6 +180,159 @@ describe('integration lifecycle', () => {
       .not.toContain('webSourceInspector');
   });
 
+  it('generates and replays a same-machine Vite browserAccess migration for created nodes', () => {
+    const workspaceRoot = createViteWorkspace();
+    const initialPlan = createIntegrationPlan({ workspaceRoot });
+    expect(applyIntegrationPlan({
+      workspaceRoot,
+      planDigest: initialPlan.planDigest,
+    }).ok).toBe(true);
+
+    const answers = { browserAccess: 'same-machine' };
+    const migration = createIntegrationPlan({ workspaceRoot, answers });
+    const pluginOperation = migration.edits.find((edit) => edit.path === 'vite.config.ts')?.operations
+      .find((operation) => operation.kind === 'plugin');
+
+    expect(migration).toMatchObject({
+      blocked: false,
+      normalizedAnswers: answers,
+    });
+    expect(pluginOperation).toMatchObject({
+      ownership: 'created',
+      controlledMutation: {
+        kind: 'vite-browser-access',
+        targetMode: 'same-machine',
+      },
+    });
+    expect(applyIntegrationPlan({
+      workspaceRoot,
+      answers,
+      planDigest: migration.planDigest,
+    }).ok).toBe(true);
+
+    const configured = readFileSync(path.join(workspaceRoot, 'vite.config.ts'), 'utf8');
+    const state = JSON.parse(readFileSync(
+      path.join(workspaceRoot, '.web-source-inspector.json'),
+      'utf8',
+    )) as IntegrationState;
+    const pluginNode = state.nodes.find((node) => node.kind === 'plugin');
+    expect(configured).toMatch(/browserAccess:\s*["']same-machine["']/u);
+    expect(pluginNode).toMatchObject({
+      ownership: 'created',
+      details: { browserAccessMode: 'same-machine' },
+    });
+    expect(pluginNode?.details?.browserAccessOriginalShape).toBeUndefined();
+    expect(pluginNode?.details?.browserAccessOriginalFingerprint).toBeUndefined();
+    expect(JSON.stringify(state)).not.toContain('controlledMutation');
+
+    const missingAnswer = applyIntegrationPlan({
+      workspaceRoot,
+      planDigest: migration.planDigest,
+    });
+    const changedAnswer = applyIntegrationPlan({
+      workspaceRoot,
+      answers: { browserAccess: 'loopback' },
+      planDigest: migration.planDigest,
+    });
+    expect(missingAnswer).toMatchObject({ ok: false, errorCode: 'PLAN_STALE', changedFiles: [] });
+    expect(changedAnswer).toMatchObject({ ok: false, errorCode: 'PLAN_STALE', changedFiles: [] });
+    expect(readFileSync(path.join(workspaceRoot, 'vite.config.ts'), 'utf8')).toBe(configured);
+
+    const removal = createRemovalPlan({ workspaceRoot });
+    expect(removal).toMatchObject({ blocked: false });
+    expect(applyRemovalPlan({ workspaceRoot, planDigest: removal.planDigest }).ok).toBe(true);
+    expect(readFileSync(path.join(workspaceRoot, 'vite.config.ts'), 'utf8'))
+      .not.toContain('webSourceInspector');
+  });
+
+  it('preserves the first reused Vite browserAccess shape through repeated migrations', () => {
+    const workspaceRoot = createViteWorkspace();
+    const configPath = path.join(workspaceRoot, 'vite.config.ts');
+    writeFileSync(configPath, `import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { webSourceInspector } from 'web-source-inspector/vite'
+
+export default defineConfig({
+  plugins: [webSourceInspector(), vue()],
+})
+`, 'utf8');
+    const initial = createIntegrationPlan({ workspaceRoot });
+    expect(applyIntegrationPlan({ workspaceRoot, planDigest: initial.planDigest }).ok).toBe(true);
+
+    const sameMachine = { browserAccess: 'same-machine' };
+    const firstMigration = createIntegrationPlan({ workspaceRoot, answers: sameMachine });
+    expect(applyIntegrationPlan({
+      workspaceRoot,
+      answers: sameMachine,
+      planDigest: firstMigration.planDigest,
+    }).ok).toBe(true);
+
+    const loopback = { browserAccess: 'loopback' };
+    const secondMigration = createIntegrationPlan({ workspaceRoot, answers: loopback });
+    expect(applyIntegrationPlan({
+      workspaceRoot,
+      answers: loopback,
+      planDigest: secondMigration.planDigest,
+    }).ok).toBe(true);
+
+    const state = JSON.parse(readFileSync(
+      path.join(workspaceRoot, '.web-source-inspector.json'),
+      'utf8',
+    )) as IntegrationState;
+    const pluginNode = state.nodes.find((node) => node.kind === 'plugin');
+    expect(pluginNode).toMatchObject({
+      ownership: 'reused',
+      details: {
+        browserAccessMode: 'loopback',
+        browserAccessOriginalShape: 'no-arguments',
+      },
+    });
+
+    const removal = createRemovalPlan({ workspaceRoot });
+    expect(removal).toMatchObject({ blocked: false });
+    expect(applyRemovalPlan({ workspaceRoot, planDigest: removal.planDigest }).ok).toBe(true);
+    expect(readFileSync(configPath, 'utf8')).toContain('webSourceInspector()');
+    expect(readFileSync(configPath, 'utf8')).not.toContain('browserAccess');
+  });
+
+  it('rejects browserAccess answers for non-Vite projects without planning writes', () => {
+    const workspaceRoot = createWebpackWorkspace(false);
+
+    const plan = createIntegrationPlan({
+      workspaceRoot,
+      answers: { browserAccess: 'same-machine' },
+    });
+
+    expect(plan).toMatchObject({ blocked: true, edits: [] });
+    expect(plan.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'INVALID_ANSWER' }),
+    ]));
+    expect(existsSync(path.join(workspaceRoot, '.web-source-inspector.json'))).toBe(false);
+  });
+
+  it('does not bypass a recorded Vite plugin fingerprint during browserAccess migration', () => {
+    const workspaceRoot = createViteWorkspace();
+    const initial = createIntegrationPlan({ workspaceRoot });
+    expect(applyIntegrationPlan({ workspaceRoot, planDigest: initial.planDigest }).ok).toBe(true);
+    const configPath = path.join(workspaceRoot, 'vite.config.ts');
+    const changed = readFileSync(configPath, 'utf8').replace(
+      'webSourceInspector()',
+      'webSourceInspector({ enabled: true })',
+    );
+    writeFileSync(configPath, changed, 'utf8');
+
+    const migration = createIntegrationPlan({
+      workspaceRoot,
+      answers: { browserAccess: 'same-machine' },
+    });
+
+    expect(migration).toMatchObject({ blocked: true, edits: [] });
+    expect(migration.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'TRANSACTION_CONFLICT' }),
+    ]));
+    expect(readFileSync(configPath, 'utf8')).toBe(changed);
+  });
+
   it('returns PLAN_STALE without overwriting a changed config', () => {
     const workspaceRoot = createViteWorkspace();
     const plan = createIntegrationPlan({ workspaceRoot });

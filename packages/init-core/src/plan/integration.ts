@@ -37,11 +37,12 @@ import type { ConfigModuleKind, ProjectDiagnostic, ProjectProfile } from '../typ
 import type {
   CreateIntegrationPlanOptions,
   AstOperation,
+  BrowserAccessMode,
   IntegrationPlan,
   PlannedFileEdit,
 } from './types';
 
-const KNOWN_ANSWERS = new Set(['bundler', 'allowedOrigin']);
+const KNOWN_ANSWERS = new Set(['bundler', 'allowedOrigin', 'browserAccess']);
 
 function normalizedAnswers(
   answers: Readonly<Record<string, string>> | undefined,
@@ -62,14 +63,26 @@ function diagnostic(
 function validateAnswers(
   answers: Record<string, string>,
   diagnostics: ProjectDiagnostic[],
+  profile: ProjectProfile,
 ): void {
   for (const [key, value] of Object.entries(answers)) {
     if (!KNOWN_ANSWERS.has(key)) {
       diagnostic(diagnostics, 'INVALID_ANSWER', `未知初始化答案：${key}`);
     } else if (typeof value !== 'string' || value.length === 0 || value.length > 2048) {
       diagnostic(diagnostics, 'INVALID_ANSWER', `初始化答案 ${key} 长度无效。`);
+    } else if (key === 'browserAccess'
+      && value !== 'loopback'
+      && value !== 'same-machine') {
+      diagnostic(diagnostics, 'INVALID_ANSWER', 'browserAccess 只能是 loopback 或 same-machine。');
+    } else if (key === 'browserAccess' && profile.bundler !== 'vite') {
+      diagnostic(diagnostics, 'INVALID_ANSWER', 'browserAccess 仅支持 Vite 项目。');
     }
   }
+}
+
+function browserAccessAnswer(answers: Record<string, string>): BrowserAccessMode | undefined {
+  const value = answers.browserAccess;
+  return value === 'loopback' || value === 'same-machine' ? value : undefined;
 }
 
 function wdsMajor(profile: ProjectProfile): 3 | 4 | undefined {
@@ -116,7 +129,9 @@ function transformConfig(
   answers: Record<string, string>,
 ) {
   if (profile.bundler === 'vite') {
-    return transformViteConfig(source, moduleKind);
+    return transformViteConfig(source, moduleKind, {
+      browserAccess: browserAccessAnswer(answers),
+    });
   }
   if (profile.bundler === 'webpack') {
     return transformWebpackConfig(source, {
@@ -272,7 +287,7 @@ export function createIntegrationPlanUnlocked(
   const answers = normalizedAnswers(options.answers);
   const profile = detectProject({ workspaceRoot: context.rootPath, answers });
   const diagnostics: ProjectDiagnostic[] = [...profile.diagnostics];
-  validateAnswers(answers, diagnostics);
+  validateAnswers(answers, diagnostics, profile);
   try {
     if (readPendingJournal(runtime, context.rootIdentity)) {
       diagnostic(diagnostics, 'RECOVERY_REQUIRED', '存在未完成事务，请先运行 doctor。');
@@ -357,10 +372,12 @@ export function createIntegrationPlanUnlocked(
   }
   let operations;
   try {
+    // existingState 已在上方通过当前 AST 的精确 fingerprint 预校验后才允许受控迁移。
     operations = preserveRecordedOwnership(
       selectedConfig.path,
       transformed.operations,
       existingState,
+      { browserAccess: browserAccessAnswer(answers) },
     );
   } catch {
     diagnostic(diagnostics, 'TRANSACTION_CONFLICT', '配置节点与 integration state fingerprint 不一致。');

@@ -1,6 +1,6 @@
 {
   "name": "web-source-inspector",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.2",
   "description": "Open Vue template sources from Vite and Webpack development pages in VS Code or Cursor.",
   "license": "MIT",
   "type": "module",
@@ -8,7 +8,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "web-source-inspector": "./dist/cli.cjs"
+    "web-source-inspector": "dist/cli.cjs"
   },
   "exports": {
     ".": {

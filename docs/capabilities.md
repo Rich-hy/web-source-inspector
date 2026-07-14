@@ -84,8 +84,9 @@ Extension Host E2E 使用 `extensionDevelopmentPath`，默认目标为 VS Code 1
 | React/Svelte | 不支持 | 没有 transform adapter |
 | Three.js/Canvas 对象 | 不支持 | 只可定位 canvas DOM；对象级来源需要独立 adapter |
 | 本机 loopback | 支持目标 | Dev Server、Extension Host 和源码必须在同一机器 |
+| Vite 同机网卡 IP | 有限支持 | `browserAccess` 默认 `same-machine`，仅接受启动快照中的本机地址；`0.1.0-beta.1` 的默认 loopback fixture 拒绝记录保留为历史证据，消费项目 Vite 6.4.1 的 localhost/127.0.0.1/192.168.8.155 Runtime、Cursor 回执和生产扫描通过，另一设备拒绝未实测 |
 | Remote SSH/WSL/Dev Container/Codespaces | 不支持 | 临时目录、loopback 和文件系统边界尚未设计验证 |
-| 远程浏览器 | 不支持 | 当前配置强制关闭，没有配对码或授权租约 |
+| 其它设备浏览器 | 不支持 | `same-machine` 不信任子网、代理、端口转发或远程设备；`remoteBrowser` 已弃用且只允许 `false` |
 
 ## 发布前必须补齐
 

@@ -4,7 +4,9 @@ Web Source Inspector 的 Vue/Vite 集成包，连接 SFC transform、Browser Run
 
 ## Status
 
-当前版本为 `0.1.0` 开发实现，尚未声明已发布到 npm。Adapter 合同覆盖 Vite 2.9～6 和 Vue 2.6/2.7/3.2+；各真实 Vue/Vite plugin 组合仍需发布矩阵验证。
+当前版本为 `0.1.0-beta.2` 发布候选。Adapter 合同覆盖 Vite 2.9～6 和 Vue 2.6/2.7/3.2+；各真实 Vue/Vite plugin 组合仍需发布矩阵验证。
+
+当次同机网卡 IP 证据覆盖仓库 Vite `6.4.3` 与消费项目 Vite `6.4.1`；没有第二设备或隔离 VM 的拒绝证据，不声明其它设备已验证拒绝。
 
 ## Usage
 
@@ -37,10 +39,15 @@ webSourceInspector(options, {
 - `workspaceRoot`、`sourceRoots`：限定可转换和可打开的 workspace 源码范围。
 - `include`、`exclude`：进一步过滤用户源码。
 - `bridge`：是否启动本机 IDE Bridge，默认开启。
+- `browserAccess`：`same-machine`（默认）或 `loopback`。默认模式只允许启动时快照中的本机网卡地址与回环地址。
 - `debugLog`：输出脱敏诊断码。
 - `compiler`：高级集成可注入当前 Vue plugin 实际使用的 compiler adapter；默认从消费项目解析。
 - `ui`：关闭入口或配置按钮位置、快捷键、单次选择和语言。
-- `remoteBrowser`：当前只允许 `false`，没有远程配对能力。
+- `remoteBrowser`：已弃用，当前只允许 `false`，没有远程配对能力。
+
+### 同机网卡 IP
+
+默认的 `webSourceInspector()` 已使用 `same-machine`。`server.host` 仍必须允许本机网卡访问，例如 `0.0.0.0` 或精确本机 IP。插件只使用实际 listener 的端口，冻结网卡地址和 Origin 集合；非回环 socket 必须与 Origin 的字面量 IP 完全相同。需要仅允许回环地址时，配置 `webSourceInspector({ browserAccess: 'loopback' })`。网卡变化后重启 Dev Server。该选项不支持代理、转发、其它电脑或手机。
 
 ## Security
 

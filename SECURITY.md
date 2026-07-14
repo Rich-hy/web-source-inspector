@@ -4,6 +4,10 @@ Web Source Inspector 可以触发 IDE 打开本机源码，因此安全问题包
 
 完整安全模型见 [docs/security.md](docs/security.md)。
 
+## 同机网卡访问边界
+
+Vite 的 `browserAccess` 默认是 `same-machine`。它只允许启动时快照中存在的本机网卡地址，并要求非回环 socket 地址与 HTTP(S) Origin 的字面量 IP、协议和实际监听端口精确一致；需要更严格的范围时可显式设为 `loopback`。它不会把子网、私网地址、代理 header、页面自报 IP 或 DNS 视为授权依据。IDE Bridge 仍只监听 `127.0.0.1`；`remoteBrowser` 已弃用且不能设为 `true`。其它设备、代理、端口转发、WSL、Docker、Dev Container 和 Remote SSH 不在支持范围内。
+
 ## Supported Versions
 
 当前没有公开稳定版本。安全修复只面向仓库中的最新 `0.1.x` 开发线，不为旧快照承诺补丁或响应期限。

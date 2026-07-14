@@ -1,7 +1,11 @@
 import { parse as babelParse } from '@babel/parser';
 import recast from 'recast';
 import { digestCanonical } from '../digest';
-import type { AstOperation } from '../plan/types';
+import type {
+  AstOperation,
+  BrowserAccessMode,
+  BrowserAccessPreviousShape,
+} from '../plan/types';
 import type { ConfigModuleKind } from '../types';
 import {
   astOperationFingerprint,
@@ -25,6 +29,7 @@ const VUE_PLUGIN_PACKAGES = new Set([
   '@vitejs/plugin-vue2',
   'vite-plugin-vue2',
 ]);
+const BROWSER_ACCESS_MODES = new Set<BrowserAccessMode>(['loopback', 'same-machine']);
 
 function parseProgram(source: string): AstNode {
   return recast.parse(source, {
@@ -211,6 +216,150 @@ function objectProperties(object: AstNode): AstNode[] | undefined {
     names.add(name);
   }
   return properties;
+}
+
+function isBrowserAccessMode(value: unknown): value is BrowserAccessMode {
+  return typeof value === 'string' && BROWSER_ACCESS_MODES.has(value as BrowserAccessMode);
+}
+
+function isStaticFalseLiteral(node: unknown): boolean {
+  if (typeof node !== 'object' || node === null) {
+    return false;
+  }
+  const candidate = node as AstNode & { value?: unknown };
+  return (candidate.type === 'BooleanLiteral' || candidate.type === 'Literal')
+    && candidate.value === false;
+}
+
+function isSafeStaticOptionValue(node: unknown): boolean {
+  if (typeof node !== 'object' || node === null) {
+    return false;
+  }
+  const candidate = node as AstNode & { value?: unknown };
+  if (['StringLiteral', 'NumericLiteral', 'BooleanLiteral', 'NullLiteral', 'RegExpLiteral'].includes(candidate.type)) {
+    return true;
+  }
+  if (candidate.type === 'Literal') {
+    return ['string', 'number', 'boolean'].includes(typeof candidate.value)
+      || candidate.value === null;
+  }
+  if (candidate.type === 'ArrayExpression') {
+    return ((candidate.elements as unknown[] | undefined) ?? []).every((element) =>
+      element !== null
+      && (element as AstNode | undefined)?.type !== 'SpreadElement'
+      && isSafeStaticOptionValue(element));
+  }
+  if (candidate.type !== 'ObjectExpression') {
+    return false;
+  }
+  const names = new Set<string>();
+  for (const property of (candidate.properties as AstNode[] | undefined) ?? []) {
+    if (!['ObjectProperty', 'Property'].includes(property.type)
+      || property.computed === true
+      || property.method === true
+      || property.kind === 'get'
+      || property.kind === 'set') {
+      return false;
+    }
+    const name = propertyName(property);
+    if (!name || name === '__proto__' || names.has(name) || !isSafeStaticOptionValue(property.value)) {
+      return false;
+    }
+    names.add(name);
+  }
+  return true;
+}
+
+interface BrowserAccessCallAnalysis {
+  previousShape: BrowserAccessPreviousShape;
+  optionsObject?: AstNode;
+  browserAccessProperty?: AstNode;
+}
+
+function analyzeBrowserAccessCall(call: AstNode): BrowserAccessCallAnalysis | undefined {
+  const argumentsList = (call.arguments as unknown[] | undefined) ?? [];
+  if (argumentsList.length === 0) {
+    return { previousShape: 'no-arguments' };
+  }
+  if (argumentsList.length !== 1) {
+    return undefined;
+  }
+  const optionsObject = argumentsList[0] as AstNode | undefined;
+  if (optionsObject?.type !== 'ObjectExpression') {
+    return undefined;
+  }
+  const names = new Set<string>();
+  let previousShape: BrowserAccessPreviousShape = 'property-absent';
+  let browserAccessProperty: AstNode | undefined;
+  for (const property of (optionsObject.properties as AstNode[] | undefined) ?? []) {
+    if (!['ObjectProperty', 'Property'].includes(property.type)
+      || property.computed === true
+      || property.method === true
+      || property.kind === 'get'
+      || property.kind === 'set') {
+      return undefined;
+    }
+    const name = propertyName(property);
+    if (!name || name === '__proto__' || names.has(name)) {
+      return undefined;
+    }
+    names.add(name);
+    if (name === 'browserAccess') {
+      if (!isStringLiteral(property.value) || !isBrowserAccessMode(property.value.value)) {
+        return undefined;
+      }
+      previousShape = property.value.value;
+      browserAccessProperty = property;
+      continue;
+    }
+    if (name === 'remoteBrowser') {
+      if (!isStaticFalseLiteral(property.value)) {
+        return undefined;
+      }
+      continue;
+    }
+    if (!isSafeStaticOptionValue(property.value)) {
+      return undefined;
+    }
+  }
+  return { previousShape, optionsObject, browserAccessProperty };
+}
+
+function createBrowserAccessProperty(mode: BrowserAccessMode): AstNode {
+  const builders = recast.types.builders;
+  return builders.property(
+    'init',
+    builders.identifier('browserAccess'),
+    builders.stringLiteral(mode),
+  ) as unknown as AstNode;
+}
+
+function applyBrowserAccessMode(
+  call: AstNode,
+  analysis: BrowserAccessCallAnalysis,
+  mode: BrowserAccessMode,
+): boolean {
+  if (analysis.previousShape === mode) {
+    return false;
+  }
+  const builders = recast.types.builders;
+  if (analysis.previousShape === 'no-arguments') {
+    call.arguments = [builders.objectExpression([
+      createBrowserAccessProperty(mode) as never,
+    ])];
+    return true;
+  }
+  if (analysis.browserAccessProperty) {
+    analysis.browserAccessProperty.value = builders.stringLiteral(mode);
+    return true;
+  }
+  const properties = (analysis.optionsObject?.properties as AstNode[] | undefined) ?? [];
+  properties.push(createBrowserAccessProperty(mode));
+  if (!analysis.optionsObject) {
+    return false;
+  }
+  analysis.optionsObject.properties = properties;
+  return true;
 }
 
 function findPluginsArray(config: AstNode, body: AstNode[]): AstNode | undefined {
@@ -463,10 +612,19 @@ function operationMatchesNode(
     && exactGeneratedNode;
 }
 
+export interface ViteAstTransformOptions {
+  browserAccess?: BrowserAccessMode;
+}
+
 export function transformViteConfig(
   source: string,
   moduleKind: ConfigModuleKind,
+  options: ViteAstTransformOptions = {},
 ): ViteAstTransformResult {
+  if (options.browserAccess !== undefined && !isBrowserAccessMode(options.browserAccess)) {
+    return { ok: false, code: source, operations: [], errorCode: 'INVALID_ANSWER' };
+  }
+  const browserAccessMode = options.browserAccess;
   let ast: AstNode;
   try {
     ast = parseProgram(source);
@@ -546,6 +704,31 @@ export function transformViteConfig(
     const existingIndex = existingCalls[0] as number;
     const moved = existingIndex > vueIndex;
     const existingCall = elements[existingIndex] as AstNode;
+    const browserAccessDetails: Record<string, string> = browserAccessMode
+      ? { browserAccessMode }
+      : {};
+    let controlledMutation: AstOperation['controlledMutation'];
+    let browserAccessChanged = false;
+    if (browserAccessMode) {
+      const analysis = analyzeBrowserAccessCall(existingCall);
+      if (!analysis) {
+        return { ok: false, code: source, operations: [], errorCode: 'CONFIG_SHAPE_UNSUPPORTED' };
+      }
+      const previousFingerprint = astOperationFingerprint(['vite-plugin', binding], existingCall);
+      browserAccessChanged = applyBrowserAccessMode(existingCall, analysis, browserAccessMode);
+      if (browserAccessChanged) {
+        const targetFingerprint = astOperationFingerprint(['vite-plugin', binding], existingCall);
+        controlledMutation = {
+          kind: 'vite-browser-access',
+          previousFingerprint,
+          targetFingerprint,
+          targetMode: browserAccessMode,
+          previousShape: analysis.previousShape,
+        };
+        browserAccessDetails.browserAccessOriginalShape = analysis.previousShape;
+        browserAccessDetails.browserAccessOriginalFingerprint = previousFingerprint;
+      }
+    }
     const prePosition = moved
       ? capturePositionAnchors(elements, existingIndex)
       : undefined;
@@ -571,6 +754,7 @@ export function transformViteConfig(
         binding,
         legacyFingerprint: legacyPluginFingerprint(binding),
         legacyCreatedCompatible: String(exactGeneratedPluginCall(existingCall, binding)),
+        ...browserAccessDetails,
         ...(moved && prePosition && postPosition ? {
           action: 'moved-before-vue',
           prePrevious: prePosition.previousAnchor,
@@ -579,14 +763,22 @@ export function transformViteConfig(
           postNext: postPosition.nextAnchor,
         } : {}),
       },
+      ...(controlledMutation ? { controlledMutation } : {}),
     });
     return {
       ok: true,
-      code: moved ? printProgram(ast, source) : source,
+      code: moved || browserAccessChanged ? printProgram(ast, source) : source,
       operations,
     };
   }
-  const call = recast.types.builders.callExpression(recast.types.builders.identifier(binding), []);
+  const call = recast.types.builders.callExpression(
+    recast.types.builders.identifier(binding),
+    browserAccessMode
+      ? [recast.types.builders.objectExpression([
+        createBrowserAccessProperty(browserAccessMode) as never,
+      ])]
+      : [],
+  );
   elements.splice(vueIndex, 0, call);
   plugins.elements = elements;
   operations.push({
@@ -599,6 +791,7 @@ export function transformViteConfig(
       action: 'inserted-before-vue',
       legacyFingerprint: legacyPluginFingerprint(binding),
       legacyCreatedCompatible: 'true',
+      ...(browserAccessMode ? { browserAccessMode } : {}),
     },
   });
   return {
@@ -706,6 +899,49 @@ function removeInspectorBinding(body: AstNode[], binding: string): boolean {
   return false;
 }
 
+function restoreBrowserAccessCall(
+  call: AstNode,
+  operation: AstOperation,
+  binding: string,
+): boolean {
+  const originalShape = operation.details?.browserAccessOriginalShape;
+  const originalFingerprint = operation.details?.browserAccessOriginalFingerprint;
+  if (originalShape === undefined && originalFingerprint === undefined) {
+    return true;
+  }
+  if (!originalFingerprint
+    || !['no-arguments', 'property-absent', 'loopback', 'same-machine'].includes(String(originalShape))
+    || operation.ownership !== 'reused') {
+    return false;
+  }
+  const analysis = analyzeBrowserAccessCall(call);
+  if (!analysis) {
+    return false;
+  }
+  if (originalShape === 'no-arguments') {
+    call.arguments = [];
+  } else if (originalShape === 'property-absent') {
+    if (!analysis.optionsObject || !analysis.browserAccessProperty) {
+      return false;
+    }
+    const properties = (analysis.optionsObject.properties as AstNode[] | undefined) ?? [];
+    const propertyIndex = properties.indexOf(analysis.browserAccessProperty);
+    if (propertyIndex < 0) {
+      return false;
+    }
+    properties.splice(propertyIndex, 1);
+    analysis.optionsObject.properties = properties;
+  } else if (originalShape === 'loopback' || originalShape === 'same-machine') {
+    if (!analysis.browserAccessProperty) {
+      return false;
+    }
+    analysis.browserAccessProperty.value = recast.types.builders.stringLiteral(originalShape);
+  } else {
+    return false;
+  }
+  return astOperationFingerprint(['vite-plugin', binding], call) === originalFingerprint;
+}
+
 export function removeViteIntegration(
   source: string,
   operations: readonly AstOperation[],
@@ -751,6 +987,8 @@ export function removeViteIntegration(
   }
   if (pluginOperation.ownership === 'created') {
     elements.splice(currentIndex, 1);
+  } else if (!restoreBrowserAccessCall(pluginNode, pluginOperation, binding)) {
+    return { ok: false, code: source, operations: [], errorCode: 'INTEGRATION_STATE_CONFLICT' };
   } else if (pluginOperation.details?.action === 'moved-before-vue') {
     const restored = restoreByPositionAnchors(elements, currentIndex, pluginOperation.details);
     if (!restored) {

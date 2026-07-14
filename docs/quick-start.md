@@ -90,7 +90,8 @@ import { webSourceInspector } from 'web-source-inspector/vite';
 | `include` | `[]` | 额外包含过滤；字符串按规范化路径包含匹配 |
 | `exclude` | `[]` | 排除过滤；始终排除 `node_modules`、`dist`、`.git` |
 | `bridge` | `true` | 是否启动本机 IDE Bridge |
-| `remoteBrowser` | `false` | 当前类型只允许 `false`，解析后也强制关闭；尚无远程浏览器配对能力 |
+| `browserAccess` | `same-machine` | 默认允许同一台电脑启动时快照中的本机网卡 IP；显式 `loopback` 可收紧为只允许回环地址 |
+| `remoteBrowser` | `false` | 已弃用；只允许 `false`，不提供远程浏览器配对能力 |
 | `debugLog` | `false` | 输出脱敏诊断码 |
 | `ui` | `true` | `false` 时不注入浏览器入口；对象形式配置 Runtime |
 
@@ -108,6 +109,8 @@ webSourceInspector({
 ```
 
 `buttonPosition` 可选 `top-left`、`top-right`、`bottom-left`、`bottom-right`；`language` 可选 `zh-CN`、`en-US`。
+
+默认的 `webSourceInspector()` 已允许同一台电脑通过本机网卡 IP 访问 Vite 页面；`server.host` 仍须允许该接口，例如 `0.0.0.0`。服务使用实际监听端口，非回环 socket 的 Origin 必须是相同的字面量 IP；需要仅允许回环地址时，使用 `webSourceInspector({ browserAccess: 'loopback' })`。网卡变化后完整重启 Dev Server。Bridge 仍只监听 `127.0.0.1`，不支持其它设备、代理、转发、WSL、Docker 或 Remote SSH。
 
 ## 安装 VSIX
 

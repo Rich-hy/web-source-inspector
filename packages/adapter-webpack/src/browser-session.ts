@@ -5,6 +5,7 @@ import type { CandidatePreference } from '@web-source-inspector/compiler-core';
 import {
   BrowserRouter,
   browserEvents,
+  createBrowserAddressPolicy,
   createBridgePath,
   createBridgeToken,
   createLoopbackBridge,
@@ -33,7 +34,7 @@ export function createWebpackBrowserRouter(
   return new BrowserRouter({
     sessionId,
     browserToken: credential.browserToken,
-    allowRemoteBrowser: false,
+    browserAddressPolicy: createBrowserAddressPolicy({ mode: 'loopback' }),
     allowedOrigins: () => credential.allowedOrigins ?? [...credential.observedOrigins],
     resolveSource(sourceId, modifiers) {
       const resolved = manifest.resolveCandidates(sourceId, preferredCandidate(modifiers));

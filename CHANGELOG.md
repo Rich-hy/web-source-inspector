@@ -1,6 +1,29 @@
 # Changelog
 
-本文记录 Web Source Inspector 的用户可见变化。项目遵循 SemVer；当前仓库尚未声明已向 npm、VS Marketplace、Open VSX 或 Cursor Marketplace 发布。
+本文记录 Web Source Inspector 的用户可见变化。项目遵循 SemVer；npm 与各扩展市场的发布状态需要分别查询确认。
+
+## 0.1.0-beta.2 - 2026-07-14
+
+### Changed
+
+- Vite 的 `browserAccess` 默认值改为 `same-machine`。零参数 `webSourceInspector()` 在 Vite `server.host` 允许本机网卡访问时可直接用于同机 IP 页面；显式 `browserAccess: 'loopback'` 保留为更严格的收紧选项。
+- VS Code/Cursor 初始化器的默认选择同步为允许本机网卡 IP，且可显式生成 `browserAccess: 'loopback'` 配置。
+
+### Security
+
+- 默认同机模式仍只接受 Dev Server 启动时冻结的本机地址，非回环 socket 与 Origin 的 IP、协议和实际端口必须精确匹配。IDE Bridge 继续只监听 `127.0.0.1`，不增加其它设备访问能力。
+
+## 0.1.0-beta.1 - 2026-07-14
+
+### Added
+
+- Vite 新增 `browserAccess: 'loopback' | 'same-machine'`。默认仅允许回环浏览器；同机模式只接受启动时冻结的本机网卡地址，并要求 socket 地址与 Origin 字面量 IP、协议和实际端口精确匹配。
+- 初始化器 CLI 与 VS Code/Cursor 入口新增 Vite 的本机网卡 IP 选择，并保留 AST 所有权、plan/apply 与 remove 恢复边界。
+
+### Security
+
+- IDE Bridge 继续只监听 `127.0.0.1`。`remoteBrowser` 已弃用且只允许 `false`；不支持其它设备、代理、端口转发、WSL、Docker、Dev Container 或 Remote SSH。
+- 网卡地址在 Dev Server 启动时冻结；地址变化后必须完整重启服务。
 
 ## 0.1.0 - 2026-07-10
 

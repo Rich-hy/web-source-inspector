@@ -40,6 +40,8 @@ npx web-source-inspector remove
 
 `init` previews and applies supported static edits, `doctor` checks state and interrupted transactions, and `remove` performs fingerprint-checked ownership-aware removal. The extension always calls the project-local CLI, validates its versioned JSON envelope and operation result, and never uses a global package or a second configuration rewriter.
 
+For a Vite initialization, the extension resolves the normal required inputs first and then offers a browser access choice. The default permits local network-interface IP access on the same machine and does not add a `browserAccess` answer. Choosing the loopback-only option regenerates the plan with `browserAccess=loopback`; the final apply uses that regenerated plan digest and normalized answers. Cancelling the choice does not apply any edits.
+
 The browser button is bottom-right by default. `Esc` exits selection mode; `Shift+click` prefers a component call site and `Alt+click` prefers a control-flow candidate when available. Successful selection is single-shot by default.
 
 ## Commands

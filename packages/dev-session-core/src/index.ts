@@ -21,6 +21,21 @@ export {
   writeSessionDescriptor,
 } from './session';
 export type { SessionRoot } from './session';
+export {
+  createBrowserAddressPolicy,
+  createBrowserAddressSnapshot,
+  isBrowserOriginAuthorized,
+  normalizeBrowserAddress,
+} from './browser-address';
+export type {
+  BrowserAccessMode,
+  BrowserAddressAuthorization,
+  BrowserAddressPolicy,
+  BrowserAddressPolicyOptions,
+  BrowserAddressSnapshot,
+  BrowserAddressSnapshotOptions,
+  BrowserOriginAuthorizationOptions,
+} from './browser-address';
 export { BrowserRouter, browserEvents } from './browser-router';
 export type {
   BrowserRouterOptions,

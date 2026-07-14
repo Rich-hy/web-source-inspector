@@ -32,7 +32,7 @@
 
 - Browser Transport 是否已连接。
 - 当前 DOM 是否存在有效 marker，sourceId 是否仍在当前 Manifest 中。
-- 页面是否通过非 loopback 地址访问，而 `remoteBrowser` 保持默认 `false`。
+- 页面是否通过本机网卡地址访问，但 Vite 的 `server.host` 未允许该接口，或配置显式收紧为 `browserAccess: 'loopback'`。
 - 目标是否只有组件调用点 fallback，或属于明确不支持的动态 DOM。
 
 浏览器中出现盘符、UNC、`/home/...`、workspace 相对路径或源码行列时，都应停止使用并按安全问题处理。
@@ -66,8 +66,14 @@ session 默认目录见 [安全模型](security.md#session-文件)。Windows 默
 | `SESSION_EXPIRED` | Vite 已退出或心跳过期；重新启动并连接 |
 | `HEARTBEAT_TIMEOUT` | Bridge 无响应；检查进程和本机安全软件 |
 | `WORKSPACE_NOT_MATCHED` | IDE workspace 与 session canonical root 无交集 |
+| `BROWSER_SAME_MACHINE_REJECTED` | socket 地址不在启动时的本机网卡快照中；确认同一电脑访问并完整重启 Dev Server |
+| `BROWSER_ORIGIN_REJECTED` | Origin 的协议、实际端口、allowlist 或字面量 IP 与 socket 地址不一致 |
 
 认证/协议错误属于 fatal rejection，不应无限重试。不要手工修改 token 或把它复制到 URL。
+
+## 本机网卡 IP 访问被拒绝
+
+Vite 默认 `browserAccess` 是 `same-machine`。同一台电脑通过网卡 IP 访问时，确认 `server.host` 是 `0.0.0.0`、`::` 或精确本机 IP，并确认没有显式配置 `browserAccess: 'loopback'`。页面的 Origin 必须使用 Dev Server 实际监听端口，不能用配置中已经回退的端口。网卡、VPN 或虚拟接口变化后重启 Dev Server。不要用 `remoteBrowser: true`、代理 header、端口转发或放开 Bridge 监听地址解决问题；它们不受支持。
 
 ## 开启选择模式后点击没有打开源码
 

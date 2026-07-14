@@ -86,6 +86,8 @@ Browser Runtime 使用 bundler-neutral payload；Vite HMR、Webpack Dev Server m
 
 Server 只能用 `sourceId` 查询当前内存 Manifest。Browser payload 和响应都不包含 relativePath、range 或源码上下文；`page.origin`、pathname、title、candidateKind 和修饰键不能转换为文件路径。修饰键只在服务端已有候选链中调整偏好，pathname 在进入 tab 摘要前移除 query/hash。
 
+Browser Router 在认证 `hello` 后还会校验服务端真实 socket 地址和 `page.origin`。默认 `same-machine` 接受回环地址及启动时冻结的本机网卡地址，且非回环 Origin 必须是与 socket 地址相同的字面量 IP，并与实际监听协议和端口完全一致；显式 `loopback` 只接受回环地址。该规则不改变协议版本，也不读取 header、query 或页面自报 IP。
+
 ## Session 描述文件
 
 每个活动 Dev Server 建立一个 session 描述文件。敏感字段只供本机扩展发现使用，不进入 browser 或 workspace。

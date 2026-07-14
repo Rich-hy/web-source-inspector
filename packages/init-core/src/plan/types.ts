@@ -2,12 +2,30 @@ import type { ProjectDiagnostic, ProjectProfile, RequiredInput } from '../types'
 
 export type NodeOwnership = 'created' | 'reused';
 
+export type BrowserAccessMode = 'loopback' | 'same-machine';
+
+export type BrowserAccessPreviousShape =
+  | 'no-arguments'
+  | 'property-absent'
+  | 'loopback'
+  | 'same-machine';
+
+/** 仅用于 init plan/apply 重放和 planDigest，不能写入 integration state 节点。 */
+export interface ViteBrowserAccessControlledMutation {
+  kind: 'vite-browser-access';
+  previousFingerprint: string;
+  targetFingerprint: string;
+  targetMode: BrowserAccessMode;
+  previousShape: BrowserAccessPreviousShape;
+}
+
 export interface AstOperation {
   kind: 'import' | 'plugin' | 'loader' | 'transport-hook' | 'state-file';
   ownership: NodeOwnership;
   fingerprint: string;
   description: string;
   details?: Readonly<Record<string, string>>;
+  controlledMutation?: ViteBrowserAccessControlledMutation;
 }
 
 export interface FileIdentity {

@@ -1,6 +1,11 @@
 import type { SourceRecord } from '@web-source-inspector/compiler-core';
+import { createBrowserAddressPolicy } from '@web-source-inspector/dev-session-core';
 import { describe, expect, it, vi } from 'vitest';
-import { BrowserRouter, type ViteBrowserClient } from './browser-router';
+import {
+  BrowserRouter,
+  type BrowserRouterOptions,
+  type ViteBrowserClient,
+} from './browser-router';
 import type { LoopbackBridge } from './bridge-types';
 
 const BROWSER_TOKEN = 'b'.repeat(43);
@@ -32,6 +37,17 @@ const record: SourceRecord = {
   accuracy: 'exact'
 };
 
+function createRouter(overrides: Partial<BrowserRouterOptions> = {}): BrowserRouter {
+  return new BrowserRouter({
+    sessionId: 'session_1234',
+    browserToken: BROWSER_TOKEN,
+    browserAddressPolicy: createBrowserAddressPolicy({ mode: 'loopback' }),
+    allowedOrigins: ['http://127.0.0.1:5173'],
+    resolveSource: () => ({ status: 'found', record }),
+    ...overrides,
+  });
+}
+
 function createClient(address = '127.0.0.1'): ViteBrowserClient & { sent: Array<[string, unknown]> } {
   const sent: Array<[string, unknown]> = [];
   return {
@@ -41,6 +57,29 @@ function createClient(address = '127.0.0.1'): ViteBrowserClient & { sent: Array<
       sent.push([event, payload]);
     }
   };
+}
+
+type RemoteAddressPath = 'socket._socket' | 'socket' | '_socket';
+
+function createClientForAddressPath(
+  path: RemoteAddressPath,
+  remoteAddress: string,
+): ViteBrowserClient & { sent: Array<[string, unknown]> } {
+  const sent: Array<[string, unknown]> = [];
+  const client: ViteBrowserClient & { sent: Array<[string, unknown]> } = {
+    sent,
+    send(event, payload) {
+      sent.push([event, payload]);
+    },
+  };
+  if (path === 'socket._socket') {
+    client.socket = { _socket: { remoteAddress } };
+  } else if (path === 'socket') {
+    client.socket = { remoteAddress };
+  } else {
+    client._socket = { remoteAddress };
+  }
+  return client;
 }
 
 function helloPayload(pageClientId = 'page_client_1234'): Record<string, unknown> {
@@ -101,27 +140,44 @@ function heartbeatPayload(pageClientId = 'page_client_1234'): Record<string, unk
 }
 
 describe('BrowserRouter', () => {
+  it.each([
+    ['client.socket._socket.remoteAddress', 'socket._socket'],
+    ['client.socket.remoteAddress', 'socket'],
+    ['client._socket.remoteAddress', '_socket'],
+  ] as const)('从 %s 读取 Vite socket 地址', (_label, path) => {
+    const router = createRouter();
+    const client = createClientForAddressPath(path, '127.0.0.1');
+
+    router.handleHello(helloPayload(), client);
+
+    expect(router.getTabs()).toHaveLength(1);
+  });
+
+  it('缺失、空值或非字符串 socket 地址时不注册页面', () => {
+    const diagnostics = vi.fn();
+    const router = createRouter({ diagnostics });
+    const missingClient = createClientForAddressPath('socket._socket', '');
+    const malformedClient = createClientForAddressPath('socket', '127.0.0.1');
+    if (malformedClient.socket) {
+      malformedClient.socket.remoteAddress = 42 as unknown as string;
+    }
+
+    router.handleHello(helloPayload('page_client_missing'), missingClient);
+    router.handleHello(helloPayload('page_client_malformed'), malformedClient);
+
+    expect(router.getTabs()).toEqual([]);
+    expect(diagnostics).toHaveBeenCalledWith('REMOTE_BROWSER_REJECTED');
+  });
+
   it('拒绝非本机浏览器', () => {
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record })
-    });
+    const router = createRouter();
     const client = createClient('192.168.1.20');
     router.handleHello(helloPayload(), client);
     expect(router.getTabs()).toHaveLength(0);
   });
 
   it('接受相同 major 的较新协议 minor 版本', () => {
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record })
-    });
+    const router = createRouter();
     const client = createClient();
 
     router.handleHello({ ...helloPayload(), protocolVersion: '1.1' }, client);
@@ -131,14 +187,7 @@ describe('BrowserRouter', () => {
 
   it('拒绝 allowlist 外的页面 origin', () => {
     const diagnostics = vi.fn();
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record }),
-      diagnostics
-    });
+    const router = createRouter({ diagnostics });
     const client = createClient();
 
     router.handleHello({
@@ -151,13 +200,7 @@ describe('BrowserRouter', () => {
   });
 
   it('只为已绑定页面响应 heartbeat', () => {
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record })
-    });
+    const router = createRouter();
     const client = createClient();
     router.handleHello(helloPayload(), client);
 
@@ -176,13 +219,7 @@ describe('BrowserRouter', () => {
       notifyTabsChanged: vi.fn(),
       dispose: vi.fn()
     } as unknown as LoopbackBridge;
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record })
-    });
+    const router = createRouter();
     const client = createClient();
     router.setBridge(bridge);
     router.handleHello(helloPayload(), client);
@@ -200,14 +237,7 @@ describe('BrowserRouter', () => {
   it('拒绝选择请求切换已绑定的 origin 或 pathname', () => {
     const requestOpenSource = vi.fn(() => ({ accepted: true as const, messageId: 'open-1' }));
     const diagnostics = vi.fn();
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record }),
-      diagnostics
-    });
+    const router = createRouter({ diagnostics });
     router.setBridge({
       requestOpenSource,
       notifyTabsChanged: vi.fn(),
@@ -231,13 +261,7 @@ describe('BrowserRouter', () => {
 
   it('重复 hello 不重置 tab 选择限频状态', () => {
     const requestOpenSource = vi.fn(() => ({ accepted: true as const, messageId: 'open-1' }));
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record })
-    });
+    const router = createRouter();
     router.setBridge({
       requestOpenSource,
       notifyTabsChanged: vi.fn(),
@@ -258,13 +282,7 @@ describe('BrowserRouter', () => {
   });
 
   it('重连复用 pageClientId 时旧请求结果仍返回发起 client', () => {
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record })
-    });
+    const router = createRouter();
     router.setBridge({
       requestOpenSource: () => ({ accepted: true, messageId: 'open-route-1' }),
       notifyTabsChanged: vi.fn(),
@@ -303,13 +321,7 @@ describe('BrowserRouter', () => {
   });
 
   it('dispose 后同一 HMR client 可以注册新的 pageClientId', () => {
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record })
-    });
+    const router = createRouter();
     const client = createClient();
     router.handleHello(helloPayload('page_client_old1'), client);
     router.handleDispose({
@@ -328,13 +340,7 @@ describe('BrowserRouter', () => {
 
   it('拒绝协议未知字段和过短 sourceId，不调用源码解析', () => {
     const resolveSource = vi.fn(() => ({ status: 'found' as const, record }));
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource
-    });
+    const router = createRouter({ resolveSource });
     const client = createClient();
     router.handleHello(helloPayload(), client);
     router.handleMetadataRequest({
@@ -348,14 +354,7 @@ describe('BrowserRouter', () => {
 
   it('活动 client 占用 pageClientId 时拒绝新 client 接管', () => {
     const diagnostics = vi.fn();
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record }),
-      diagnostics
-    });
+    const router = createRouter({ diagnostics });
     const activeClient = createClient();
     const contender = createClient();
     if (activeClient.socket) {
@@ -375,14 +374,7 @@ describe('BrowserRouter', () => {
 
   it('阻止不符合 Vite 到 Browser 协议的结果', () => {
     const diagnostics = vi.fn();
-    const router = new BrowserRouter({
-      sessionId: 'session_1234',
-      browserToken: BROWSER_TOKEN,
-      allowRemoteBrowser: false,
-      allowedOrigins: ['http://127.0.0.1:5173'],
-      resolveSource: () => ({ status: 'found', record }),
-      diagnostics
-    });
+    const router = createRouter({ diagnostics });
     const client = createClient();
     router.handleHello(helloPayload(), client);
     router.sendResult({

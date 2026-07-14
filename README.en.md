@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | **English**
 
-> **Development status:** version 0.1.0 is a local development/release candidate. It has not been published to the npm registry, VS Marketplace, Open VSX, or Cursor Marketplace. Build the npm tarball and VSIX from this repository for local evaluation. Packaged VSIX behavior in VS Code and Cursor still requires release smoke-test evidence for each editor.
+> **Development status:** version 0.1.0-beta.2 is the release candidate. Check npm and each extension marketplace independently for publication status. Packaged VSIX behavior in VS Code and Cursor still requires release smoke-test evidence for each editor.
 
 Web Source Inspector maps an element in a Vue development page back to its original .vue template range in VS Code or Cursor. It works through project-side Vite or Webpack/Vue CLI integration, rather than attempting to guess source locations from the final DOM.
 
@@ -25,7 +25,8 @@ These version ranges are implementation scope, not a claim that every version co
 
 | Environment | Current evidence |
 | --- | --- |
-| Vue 3.5.39 + Vite 6.4.3 + @vitejs/plugin-vue 5.2.4 | Seven browser E2E cases cover the inspector UI, markers, event isolation, v-for IDs, Teleport, component-call-site selection, and privacy of tooltip/protocol data. |
+| Vue 3.5.39 + Vite 6.4.3 + @vitejs/plugin-vue 5.2.4 | Seven browser E2E cases cover the inspector UI, markers, event isolation, v-for IDs, Teleport, component-call-site selection, and privacy of tooltip/protocol data; focused policy tests cover same-machine authorization. |
+| Vue 3.5.29 + Vite 6.4.1 + @vitejs/plugin-vue 5.2.4 | `threejs-editor` verified Runtime, markers, and Cursor acknowledgements on localhost, 127.0.0.1, and local `192.168.8.155`; rejection from another device remains untested. |
 | Vue 3.5.39 + Webpack 5.108.4 + vue-loader 17.4.2 + webpack-dev-server 4.15.2 | One browser E2E case covers the Loader, Runtime, Webpack Dev Server stream/hello flow, and metadata request. |
 | Vue 2.7.16 + Vue CLI 3.12.1 + Webpack 4.47.0 + vue-loader 15.11.1 | A local project has started and restarted successfully; the packaged VSIX was installed in Cursor and connected to its local Bridge. Browser-click-to-file-open verification is still pending. |
 
@@ -35,7 +36,7 @@ See the [capability and verification matrix](docs/capabilities.md) for exact beh
 
 - React, Svelte, SSR/hydration, independent Rollup integration, Pug, MDX, and external Vue template files.
 - Canvas or Three.js object-level selection. The surrounding canvas DOM element can be selected, but a separate adapter is required for rendered objects.
-- Remote browsers, WSL, Remote SSH, Dev Containers, Codespaces, and any workflow where the browser, development server, extension host, and source workspace are not on the same machine.
+- Browsers on other devices, WSL, Remote SSH, Dev Containers, Codespaces, and any workflow where the browser, development server, extension host, and source workspace are not on the same machine.
 - Opening files outside the trusted local workspace.
 - Transforming third-party component templates by default. When possible, selection falls back to the component call site in user code.
 
@@ -49,14 +50,14 @@ See the [capability and verification matrix](docs/capabilities.md) for exact beh
 
 ## Quick start
 
-Because 0.1.0 is not yet available in a registry, first build a local npm tarball from this repository:
+To evaluate a local tarball first, build it from this repository:
 
 ~~~powershell
 pnpm install
 pnpm package:npm
 ~~~
 
-Install the generated web-source-inspector-0.1.0.tgz in the target Vue project as a development dependency. After a registry release, the equivalent command will be:
+Install the generated web-source-inspector-0.1.0-beta.2.tgz in the target Vue project as a development dependency. After a registry release, the equivalent command will be:
 
 ~~~powershell
 npm install --save-dev web-source-inspector
@@ -108,6 +109,10 @@ The extension invokes the same project-local CLI logic as the terminal workflow.
 Press Esc to leave selection mode. A successful selection exits by default because single-shot mode is enabled. Shift+click prefers a component call-site candidate, while Alt+click prefers a nearby control-flow candidate when available. While selection mode is armed, the runtime intercepts the relevant pointer, click, and context-menu events in the capture phase so normal page behavior is not triggered by a source-selection click.
 
 For advanced Vite options, configuration examples, extension commands, and settings, see the [quick-start guide](docs/quick-start.md).
+
+## Same-machine Vite IP access
+
+`browserAccess` defaults to `same-machine`, so a Vite page can be opened through a local network-interface IP on the same computer without an explicit plugin option. `server.host` must still permit that interface, such as `0.0.0.0` or the exact local IP. The server freezes local interface addresses and the actual listener port at startup; the browser socket address and Origin must match exactly. Configure `webSourceInspector({ browserAccess: 'loopback' })` to restrict access to loopback addresses. Restart the Dev Server after a network change. The Bridge always listens on `127.0.0.1`; deprecated `remoteBrowser` only accepts `false`, and proxies, forwarding, WSL, Docker, Remote SSH, phones, and other computers are unsupported.
 
 ## How it works
 

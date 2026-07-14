@@ -13,7 +13,10 @@ import {
   type BrowserToServerPayloadMap,
   type ServerToBrowserEvent
 } from '@web-source-inspector/protocol';
-import { isLoopbackAddress } from './session';
+import {
+  isBrowserOriginAuthorized,
+  type BrowserAddressPolicy
+} from './browser-address';
 import type {
   BridgeConnectionState,
   BridgeOpenRequest,
@@ -36,6 +39,8 @@ interface PageClient {
   client: BrowserTransportClient;
   pathname: string;
   origin: string;
+  normalizedRemoteAddress: string;
+  remoteAddressLoopback: boolean;
   title: string;
   connectedAt: number;
   lastSeenAt: number;
@@ -45,7 +50,7 @@ interface PageClient {
 export interface BrowserRouterOptions {
   sessionId: string;
   browserToken: string;
-  allowRemoteBrowser: boolean;
+  browserAddressPolicy: BrowserAddressPolicy;
   allowedOrigins: readonly string[] | (() => readonly string[]);
   resolveSource: (
     sourceId: string,
@@ -71,17 +76,6 @@ function payloadWithinLimit(payload: unknown): boolean {
     return utf8ByteLength(JSON.stringify(payload)) <= PROTOCOL_LIMITS.browserMessageBytes;
   } catch {
     return false;
-  }
-}
-
-function normalizeHttpOrigin(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === value
-      ? url.origin
-      : null;
-  } catch {
-    return null;
   }
 }
 
@@ -135,13 +129,27 @@ export class BrowserRouter {
     if (!validated) {
       return;
     }
-    const address = client.remoteAddress ?? undefined;
-    if (!this.#options.allowRemoteBrowser && !isLoopbackAddress(address)) {
-      this.#options.diagnostics?.('REMOTE_BROWSER_REJECTED');
+    const addressAuthorization = this.#options.browserAddressPolicy.authorize(
+      client.remoteAddress
+    );
+    if (!addressAuthorization.allowed) {
+      this.#options.diagnostics?.(
+        this.#options.browserAddressPolicy.mode === 'loopback'
+          ? 'REMOTE_BROWSER_REJECTED'
+          : 'BROWSER_SAME_MACHINE_REJECTED'
+      );
+      this.sendRejectedConnection(client, validated.pageClientId);
       return;
     }
-    if (!this.isAllowedOrigin(validated.page.origin)) {
+    if (!isBrowserOriginAuthorized({
+      mode: this.#options.browserAddressPolicy.mode,
+      normalizedRemoteAddress: addressAuthorization.normalizedAddress,
+      remoteAddressLoopback: addressAuthorization.loopback,
+      origin: validated.page.origin,
+      allowedOrigins: this.getAllowedOrigins()
+    })) {
       this.#options.diagnostics?.('BROWSER_ORIGIN_REJECTED');
+      this.sendRejectedConnection(client, validated.pageClientId);
       return;
     }
 
@@ -166,6 +174,8 @@ export class BrowserRouter {
       client,
       origin: validated.page.origin,
       pathname: validated.page.pathname,
+      normalizedRemoteAddress: addressAuthorization.normalizedAddress,
+      remoteAddressLoopback: addressAuthorization.loopback,
       title: validated.page.title,
       connectedAt: previousPage?.connectedAt || now,
       lastSeenAt: now,
@@ -223,7 +233,7 @@ export class BrowserRouter {
     if (
       validated.page.origin !== page.origin ||
       validated.page.pathname !== page.pathname ||
-      !this.isAllowedOrigin(validated.page.origin)
+      !this.isPageOriginAuthorized(page, validated.page.origin)
     ) {
       this.#options.diagnostics?.('BROWSER_PAGE_BINDING_REJECTED');
       return;
@@ -473,6 +483,20 @@ export class BrowserRouter {
     });
   }
 
+  private sendRejectedConnection(
+    client: BrowserTransportClient,
+    pageClientId: string
+  ): void {
+    this.sendBrowserPayload(client, BROWSER_EVENTS.connection, {
+      pageClientId,
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: this.#options.sessionId,
+      timestamp: Date.now(),
+      connected: false,
+      message: '当前浏览器地址未授权'
+    });
+  }
+
   private pruneStalePages(): boolean {
     const cutoff = Date.now() - BROWSER_PAGE_TTL_MS;
     let changed = false;
@@ -525,15 +549,20 @@ export class BrowserRouter {
     client.send(event, result.value);
   }
 
-  private isAllowedOrigin(origin: string): boolean {
-    const configured = typeof this.#options.allowedOrigins === 'function'
+  private getAllowedOrigins(): readonly string[] {
+    return typeof this.#options.allowedOrigins === 'function'
       ? this.#options.allowedOrigins()
       : this.#options.allowedOrigins;
-    const normalizedOrigin = normalizeHttpOrigin(origin);
-    if (normalizedOrigin === null) {
-      return false;
-    }
-    return configured.some((candidate) => normalizeHttpOrigin(candidate) === normalizedOrigin);
+  }
+
+  private isPageOriginAuthorized(page: PageClient, origin: string): boolean {
+    return isBrowserOriginAuthorized({
+      mode: this.#options.browserAddressPolicy.mode,
+      normalizedRemoteAddress: page.normalizedRemoteAddress,
+      remoteAddressLoopback: page.remoteAddressLoopback,
+      origin,
+      allowedOrigins: this.getAllowedOrigins()
+    });
   }
 }
 

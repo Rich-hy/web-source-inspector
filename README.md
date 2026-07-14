@@ -6,7 +6,7 @@ Web Source Inspector 用于在 Vue 开发页面中选择一个元素，并在 VS
 
 定位由项目端 Adapter、浏览器 Runtime、本机 Loopback Bridge 和 IDE 扩展协同完成。浏览器只提交不透明的 <code>sourceId</code>、认证 token 与必要会话元数据；不会上传本机文件路径、源码范围或 IDE Bridge 凭据。
 
-> **版本状态：** 当前为 <code>0.1.0</code> 开发候选，尚未发布到 npm、VS Marketplace、Open VSX 或 Cursor Marketplace。npm 包与 VSIX 均需从本仓库本地打包；真实 VS Code/Cursor 安装验证仍应在发布前单独留存证据。
+> **版本状态：** 当前为 <code>0.1.0-beta.2</code> 发布候选。npm 包与 VSIX 的发布状态应分别以对应仓库查询结果为准；真实 VS Code/Cursor 安装验证仍应在发布前单独留存证据。
 
 ## 核心能力
 
@@ -20,7 +20,7 @@ Web Source Inspector 用于在 Vue 开发页面中选择一个元素，并在 VS
 
 - 实现范围为 Vue 2.6、Vue 2.7、Vue 3.2+，以及 Vite 2～6、Webpack 4/5、Vue CLI 3/4/5 的标准配置形态；每个版本组合的实际验证状态以 [能力矩阵](docs/capabilities.md) 为准。
 - 第三方组件内部模板默认不转换，会降级定位到用户项目中的组件调用点。
-- 当前不承诺 Three.js/Canvas 对象、React、SSR、Pug/MDX、WSL、Remote SSH、Dev Container 或 Codespaces；远程浏览器也不在支持范围内。
+- 当前不承诺 Three.js/Canvas 对象、React、SSR、Pug/MDX、WSL、Remote SSH、Dev Container 或 Codespaces；其它设备上的远程浏览器也不在支持范围内。
 
 ### 当前验证基线
 
@@ -28,7 +28,8 @@ Web Source Inspector 用于在 Vue 开发页面中选择一个元素，并在 VS
 
 | 环境 | 当前证据 |
 | --- | --- |
-| Vue 3.5.39 + Vite 6.4.3 + @vitejs/plugin-vue 5.2.4 | 7 项浏览器 E2E 覆盖 Inspector UI、marker、事件隔离、<code>v-for</code>、Teleport、组件调用点与 tooltip/协议隐私。 |
+| Vue 3.5.39 + Vite 6.4.3 + @vitejs/plugin-vue 5.2.4 | 7 项浏览器 E2E 覆盖 Inspector UI、marker、事件隔离、<code>v-for</code>、Teleport、组件调用点与 tooltip/协议隐私；同机网卡授权由聚焦策略测试覆盖。 |
+| Vue 3.5.29 + Vite 6.4.1 + @vitejs/plugin-vue 5.2.4 | `threejs-editor` 在 localhost、127.0.0.1 与本机 `192.168.8.155` 上完成 Runtime/marker/Cursor 回执验证；其它设备拒绝未实测。 |
 | Vue 3.5.39 + Webpack 5.108.4 + vue-loader 17.4.2 + WDS 4.15.2 | 1 项浏览器 E2E 覆盖 Loader、Runtime、WDS stream/hello 与 metadata 请求。 |
 | Vue 2.7.16 + Vue CLI 3.12.1 + Webpack 4.47.0 + vue-loader 15.11.1 | 已完成本机启动/重启与 Cursor VSIX 安装、Bridge 连接；浏览器点击到实际文件打开仍待验证。 |
 
@@ -44,7 +45,7 @@ Web Source Inspector 用于在 Vue 开发页面中选择一个元素，并在 VS
 npm install -D web-source-inspector
 ```
 
-当前仓库还未发布到 npm registry。本地验收时先在本仓库执行 `pnpm package:npm`，再把生成的 `.tgz` 作为 devDependency 安装到目标项目；正式发布后才使用上面的 registry 安装命令。
+本地验收时可先在本仓库执行 `pnpm package:npm`，再把生成的 `.tgz` 作为 devDependency 安装到目标项目；npm 发布后可直接使用上面的 registry 安装命令。
 
 然后选择任一入口完成一次项目接入：
 
@@ -62,6 +63,10 @@ npx web-source-inspector init
 npx web-source-inspector doctor
 npx web-source-inspector remove
 ```
+
+## 同机网卡 IP 访问（Vite）
+
+默认 `browserAccess` 为 `same-machine`，因此同一台电脑可直接通过本机网卡 IP 访问 Vite 页面。Vite 的 `server.host` 仍必须允许该网卡访问，例如 `0.0.0.0` 或精确的本机 IP。服务启动时会冻结本机接口地址和实际监听端口；浏览器的 socket 地址、页面 Origin 与该端口必须精确匹配。需要收紧为仅回环地址时，显式配置 `webSourceInspector({ browserAccess: 'loopback' })`。网卡变化后需要完整重启 Dev Server。Bridge 始终只监听 `127.0.0.1`，`remoteBrowser` 已弃用且只能为 `false`；代理、端口转发、WSL、Docker、Remote SSH、手机和其它电脑不受支持。
 
 ## 完成一次定位
 

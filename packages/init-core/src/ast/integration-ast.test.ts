@@ -22,6 +22,100 @@ module.exports = { plugins: [vue()] }
     );
   });
 
+  it('creates a static browserAccess object only when the answer is explicit', () => {
+    const source = `import vue from '@vitejs/plugin-vue'
+export default { plugins: [vue()] }
+`;
+    const defaultResult = transformViteConfig(source, 'esm');
+    const sameMachineResult = transformViteConfig(source, 'esm', {
+      browserAccess: 'same-machine',
+    });
+
+    expect(defaultResult.code).toContain('webSourceInspector()');
+    expect(sameMachineResult.code).toMatch(
+      /webSourceInspector\(\{\s*browserAccess:\s*["']same-machine["']\s*\}\)/u,
+    );
+    expect(sameMachineResult.operations.find((item) => item.kind === 'plugin')).toMatchObject({
+      ownership: 'created',
+      details: { browserAccessMode: 'same-machine' },
+    });
+  });
+
+  it('changes only static browserAccess option objects', () => {
+    const sourceFor = (call: string) => `import vue from '@vitejs/plugin-vue'
+import { webSourceInspector } from 'web-source-inspector/vite'
+export default { plugins: [${call}, vue()] }
+`;
+    const unsafeCalls = [
+      'webSourceInspector(options)',
+      'webSourceInspector({}, {})',
+      'webSourceInspector({ ...options })',
+      'webSourceInspector({ [key]: false })',
+      'webSourceInspector({ browserAccess: mode })',
+      'webSourceInspector({ remoteBrowser: true })',
+      'webSourceInspector({ enabled: enabledFromEnvironment })',
+      "webSourceInspector({ browserAccess: 'loopback', browserAccess: 'same-machine' })",
+    ];
+
+    for (const call of unsafeCalls) {
+      expect(transformViteConfig(sourceFor(call), 'esm', {
+        browserAccess: 'same-machine',
+      })).toMatchObject({ ok: false, errorCode: 'CONFIG_SHAPE_UNSUPPORTED' });
+    }
+  });
+
+  it('restores a reused browserAccess call to its original static shape', () => {
+    const sourceFor = (call: string) => `import vue from '@vitejs/plugin-vue'
+import { webSourceInspector } from 'web-source-inspector/vite'
+export default { plugins: [${call}, vue()] }
+`;
+    const cases = [
+      {
+        source: sourceFor('webSourceInspector()'),
+        mode: 'same-machine' as const,
+        original: /webSourceInspector\(\)/u,
+        shape: 'no-arguments',
+      },
+      {
+        source: sourceFor('webSourceInspector({ enabled: true })'),
+        mode: 'same-machine' as const,
+        original: /webSourceInspector\(\{\s*enabled:\s*true\s*\}\)/u,
+        shape: 'property-absent',
+      },
+      {
+        source: sourceFor("webSourceInspector({ browserAccess: 'loopback' })"),
+        mode: 'same-machine' as const,
+        original: /browserAccess:\s*["']loopback["']/u,
+        shape: 'loopback',
+      },
+      {
+        source: sourceFor("webSourceInspector({ browserAccess: 'same-machine' })"),
+        mode: 'loopback' as const,
+        original: /browserAccess:\s*["']same-machine["']/u,
+        shape: 'same-machine',
+      },
+    ];
+
+    for (const item of cases) {
+      const result = transformViteConfig(item.source, 'esm', { browserAccess: item.mode });
+      const pluginOperation = result.operations.find((operation) => operation.kind === 'plugin');
+      const removed = removeViteIntegration(result.code, result.operations);
+
+      expect(result.ok).toBe(true);
+      expect(pluginOperation).toMatchObject({
+        ownership: 'reused',
+        details: { browserAccessOriginalShape: item.shape },
+        controlledMutation: {
+          kind: 'vite-browser-access',
+          previousShape: item.shape,
+          targetMode: item.mode,
+        },
+      });
+      expect(removed.ok).toBe(true);
+      expect(removed.code).toMatch(item.original);
+    }
+  });
+
   it('moves a reused call before Vue and restores its prior position on remove', () => {
     const source = `import vue from '@vitejs/plugin-vue'
 import { webSourceInspector } from 'web-source-inspector/vite'

@@ -18,8 +18,10 @@ Webpack dev-server support is limited to 3.x or `>=4.7 <5`. Raw Webpack watch mo
 
 ## Install and manage integration
 
+This is a beta release for public validation. Install it through the `beta` dist-tag:
+
 ```sh
-npm install --save-dev web-source-inspector
+npm install --save-dev web-source-inspector@beta
 npx web-source-inspector init
 ```
 
@@ -31,6 +33,10 @@ npx web-source-inspector remove
 ```
 
 `doctor` checks the recorded state and attempts recovery for an interrupted transaction. `remove` previews an ownership-aware removal plan and only removes nodes that still match the recorded fingerprint; it does not delete unrelated pre-existing configuration.
+
+## Same-machine Vite IP access
+
+`browserAccess` defaults to `same-machine`, so a Vite project can use a local network-interface IP on the same computer without an explicit plugin option. `server.host` must permit that interface, the actual listener port and Origin must match exactly, and network changes require a Dev Server restart. Configure `webSourceInspector({ browserAccess: 'loopback' })` to limit browser access to loopback addresses. The IDE Bridge still binds only to `127.0.0.1`. `remoteBrowser` is deprecated and only accepts `false`; phones, other computers, proxies, port forwarding, WSL, Docker, Dev Containers, and Remote SSH are unsupported.
 
 The same workflow is available through the companion extension. Open a trusted local workspace, run **Source Inspector: Enable Project**, review the diff, confirm the plan, and then continue using the project's existing `dev` or `serve` command. In a monorepo, choose the actual Vue application when prompted.
 

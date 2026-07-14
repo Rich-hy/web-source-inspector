@@ -120,6 +120,44 @@ describe('Webpack BrowserRouter binding', () => {
       browserEvents.metadata,
     ]);
     expect(sent[1]?.payload).toMatchObject({ sourceId, tagName: 'div' });
+
+    const remoteSent: Array<{ event: string; payload: unknown }> = [];
+    const remoteClient: WebpackBrowserClientContext = {
+      pageClientId: 'page_client_remote',
+      connectionId: 'connection_remote',
+      remoteAddress: '192.168.8.156',
+      send(event, payload) {
+        remoteSent.push({ event, payload });
+      },
+      isOpen: () => true,
+    };
+    await handler.onMessage?.(
+      {
+        event: browserEvents.hello,
+        payload: {
+          ...browserContext,
+          pageClientId: remoteClient.pageClientId,
+          timestamp: Date.now(),
+          runtimeVersion: '0.1.0',
+          capabilities: [],
+          page: {
+            origin: 'http://127.0.0.1:8080',
+            pathname: '/',
+            title: 'Remote fixture',
+          },
+        },
+      },
+      remoteClient,
+    );
+
+    expect(remoteSent).toContainEqual({
+      event: browserEvents.connection,
+      payload: expect.objectContaining({
+        connected: false,
+        message: '当前浏览器地址未授权',
+      }),
+    });
+    expect(session.browserRouter?.getTabs() ?? []).toHaveLength(1);
     disposeWebpackAdapterSession(compiler);
   });
 });

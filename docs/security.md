@@ -51,9 +51,9 @@ Browser page  ->  Dev Server sourceId Manifest  ->  Loopback Bridge  ->  IDE Ext
 
 ## 远程浏览器
 
-默认 `remoteBrowser: false`，Browser Router 拒绝非 loopback 客户端。
+默认 `browserAccess: 'same-machine'`，Browser Router 只接受回环地址和启动时冻结的本机网卡地址；非回环 socket 必须与 HTTP(S) Origin 的字面量 IP、协议和实际 listener 端口精确一致。Vite 可显式使用 `browserAccess: 'loopback'` 收紧为只接受回环客户端。
 
-当前公开配置类型只允许 `remoteBrowser: false`，配置解析也会强制关闭。尚未提供一次性配对码或短期授权租约，因此不得声明支持手机或其它电脑触发 IDE。未来设计远程浏览器能力时仍必须满足：
+`remoteBrowser` 已弃用且公开类型只允许 `false`，配置解析也会拒绝 `true`。`same-machine` 不是远程浏览器配对，不信任子网、私网范围、DNS、代理 header 或页面自报 IP；网卡变化后必须重启 Dev Server。尚未提供一次性配对码或短期授权租约，因此不得声明支持手机或其它电脑触发 IDE。未来设计远程浏览器能力时仍必须满足：
 
 - 远端浏览器永远拿不到 Bridge token。
 - 显式、短期、可撤销配对。

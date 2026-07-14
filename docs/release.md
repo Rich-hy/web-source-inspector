@@ -11,7 +11,7 @@
 
 `@web-source-inspector/*` workspace 包均为内部私有实现，不单独发布。未来 Three.js、React 或其它框架 adapter 是否拆包，需要在公共 API 稳定后单独评审。
 
-当前仓库版本为 `0.1.0`，尚未声明任何 registry/marketplace 已发布状态。
+当前 npm 发布候选为 `0.1.0-beta.2`；npm 与各 extension marketplace 的发布状态需要分别查询确认。
 
 当前已生成本地 npm tgz 和 VSIX；tgz 的 24 项归档白名单、exports、Node.js 16.20.2 安装后根/Vite/Webpack CJS/ESM、物理 Loader 与 CLI doctor smoke，以及 VSIX 的 7 项归档白名单和 bundle freshness 已验证。当前类型检查覆盖 15 个 workspace 项目，单元/集成测试为 `239/239`；Browser E2E 包含 Vite 7 项和 Webpack 1 项，Extension Host trusted/untrusted 场景通过。Vite basic 与 Webpack basic 的生产构建及 Inspector/绝对路径扫描通过。VS Code 1.90、当前 VS Code 和 Cursor 的真实 VSIX 安装 smoke，以及 Element Plus、monorepo 和 Browser -> Bridge -> IDE 完整链路仍未形成发布证据。
 
@@ -24,6 +24,18 @@
 - server 与 extension 可以版本不同，但必须通过协议和 capability 验证。
 - Vue/Vite/Webpack/Vue CLI 支持范围只能依据 fixture 矩阵发布。
 - 配置弃用至少保留一个 minor 周期，并给出替代项和删除版本。
+
+## 0.1.0-beta.2 默认同机网卡 IP 验收
+
+`browserAccess` 默认 `same-machine`，Vite 在 `server.host` 允许本机网卡访问时无需额外插件配置。显式 `browserAccess: 'loopback'` 保留为只允许回环浏览器的收紧选项。发布记录必须分别保留：实际 listener 端口与冻结 `devOrigins`、Bridge 仍监听 `127.0.0.1`、localhost/127.0.0.1/本机网卡 IP 的开发态证据，以及生产构建无 Runtime/Bridge 特征的扫描结果。没有第二设备或隔离 VM 的拒绝证据时，只能声明本机网卡 IP 可用，不能声明远端设备已验证拒绝。代理、端口转发、WSL、Docker、Dev Container 和 Remote SSH 不支持。
+
+本次 `0.1.0-beta.2` 必须重新保留聚焦测试、类型检查、构建和 tgz 检查证据；其中其它设备或隔离 VM 的拒绝证据仍未取得。
+
+## 0.1.0-beta.1 同机网卡 IP 验收（历史）
+
+`browserAccess` 默认 `loopback`，Vite 的 `same-machine` 只用于同一台电脑的本机网卡地址。发布记录必须分别保留：实际 listener 端口与冻结 `devOrigins`、Bridge 仍监听 `127.0.0.1`、localhost/127.0.0.1/本机网卡 IP 的开发态证据，以及生产构建无 Runtime/Bridge 特征的扫描结果。没有第二设备或隔离 VM 的拒绝证据时，只能声明本机网卡 IP 可用，不能声明远端设备已验证拒绝。代理、端口转发、WSL、Docker、Dev Container 和 Remote SSH 不支持。
+
+本次 `0.1.0-beta.1` 证据：Vite `6.4.3` 聚焦测试和默认 loopback fixture 的本机网卡 IP 拒绝、消费项目 Vite `6.4.1` 的 localhost/127.0.0.1/`192.168.8.155` Runtime 与 Cursor 回执、Bridge loopback 检查、生产构建扫描均已执行。未取得第二设备或隔离 VM 的拒绝证据。
 
 ## 发布前阻断项
 

@@ -24,7 +24,14 @@ export interface IntegrationFileEdit {
   afterContent: string | null;
 }
 
+export type IntegrationBundler = 'vite' | 'webpack' | 'vue-cli' | 'ambiguous' | 'unsupported';
+
+export interface IntegrationPlanProfile {
+  bundler: IntegrationBundler;
+}
+
 export interface IntegrationPlanResult {
+  profile: IntegrationPlanProfile | null;
   normalizedAnswers: Record<string, string>;
   requiredInputs?: IntegrationQuestion[];
   diagnostics: IntegrationDiagnostic[];
@@ -77,6 +84,13 @@ function isFileEdit(value: unknown): value is IntegrationFileEdit {
     && (typeof value.afterContent === 'string' || value.afterContent === null);
 }
 
+function isPlanProfile(value: unknown): value is IntegrationPlanProfile {
+  return isRecord(value)
+    && ['vite', 'webpack', 'vue-cli', 'ambiguous', 'unsupported'].includes(
+      String(value.bundler),
+    );
+}
+
 function parsePlanResult(
   value: unknown,
   operation: 'init' | 'remove',
@@ -93,6 +107,9 @@ function parsePlanResult(
     || !value.edits.every(isFileEdit)
     || !Array.isArray(value.diagnostics)
     || !value.diagnostics.every(isDiagnostic)
+    || (operation === 'init'
+      ? !isPlanProfile(value.profile)
+      : value.profile !== null && !isPlanProfile(value.profile))
     || !isRecord(value.normalizedAnswers)
     || !Object.entries(value.normalizedAnswers).every(([key, answer]) =>
       /^[A-Za-z0-9._:-]{1,128}$/u.test(key) && typeof answer === 'string')

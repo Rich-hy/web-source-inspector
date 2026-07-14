@@ -14,11 +14,15 @@ import {
 import {
   createBridgePath,
   createBridgeToken,
+  createBrowserAddressPolicy,
+  createBrowserAddressSnapshot,
   createBrowserToken,
   createLoopbackBridge,
   createSessionHmacKey,
   createSessionId,
   getSessionDirectory,
+  type BrowserAddressPolicy,
+  type BrowserAddressSnapshot,
   type SessionRoot,
 } from '@web-source-inspector/dev-session-core';
 import {
@@ -31,6 +35,7 @@ import {
   type VueCompilerAdapter,
 } from '@web-source-inspector/transform-vue';
 import type { Plugin, ResolvedConfig, ViteDevServer } from 'vite';
+import { resolveViteBrowserAccessContext } from './browser-access';
 import { BrowserRouter, browserEvents, type ViteBrowserClient } from './browser-router';
 import {
   createClientModule,
@@ -48,7 +53,11 @@ import {
 } from './types';
 import { findWorkspaceRoot, resolveVueSfcRequest, shouldTransform, toWireRelativePath } from './workspace';
 
-export type { WebSourceInspectorAssets, WebSourceInspectorOptions } from './types';
+export type {
+  BrowserAccessMode,
+  WebSourceInspectorAssets,
+  WebSourceInspectorOptions,
+} from './types';
 export { COMPONENT_SOURCE_ATTRIBUTE, SOURCE_ATTRIBUTE } from '@web-source-inspector/runtime';
 
 interface PendingModuleState {
@@ -65,6 +74,10 @@ interface ActiveViteSession {
   pendingModules: Map<string, PendingModuleState>;
   moduleBuildIds: Map<string, number>;
   rootKey: string;
+  browserAddressSnapshot: BrowserAddressSnapshot;
+  browserAddressPolicy: BrowserAddressPolicy;
+  allowedOrigins: readonly string[];
+  browserAccessInitialized: boolean;
   browserRouter: BrowserRouter;
   bridgeDispose?: () => Promise<void>;
   bridgeStartPromise?: Promise<void>;
@@ -104,30 +117,6 @@ function createRuntimeHtmlTag(base: string): {
 function moduleCompilerId(sessionId: string, moduleId: string): string {
   const moduleDigest = createHash('sha256').update(moduleId).digest('base64url').slice(0, 22);
   return `vite_${sessionId}_${moduleDigest}`;
-}
-
-function collectDevOrigins(server: ViteDevServer, config: ResolvedConfig): string[] {
-  const origins = new Set<string>();
-  const candidates = [
-    ...(server.resolvedUrls?.local ?? []),
-    ...(server.resolvedUrls?.network ?? []),
-    ...(typeof config.server.origin === 'string' ? [config.server.origin] : []),
-  ];
-  for (const candidate of candidates) {
-    try {
-      origins.add(new URL(candidate).origin);
-    } catch {
-      // 非 URL 的 Vite 展示值不能成为 Browser allowlist。
-    }
-  }
-  if (origins.size === 0) {
-    const protocol = config.server.https ? 'https:' : 'http:';
-    const port = config.server.port ?? 5173;
-    origins.add(`${protocol}//127.0.0.1:${port}`);
-    origins.add(`${protocol}//localhost:${port}`);
-    origins.add(`${protocol}//[::1]:${port}`);
-  }
-  return [...origins];
 }
 
 /**
@@ -172,18 +161,12 @@ export function webSourceInspector(
   }
 
   async function startBridge(
-    server: ViteDevServer,
     sessionRoot: SessionRoot,
     session: ActiveViteSession,
   ): Promise<void> {
     if (!options.bridge || session.bridgeDispose) {
       return;
     }
-    const config = resolvedConfig;
-    if (!config) {
-      throw new Error('VITE_CONFIG_NOT_RESOLVED');
-    }
-    const origins = collectDevOrigins(server, config);
     const bridge = await createLoopbackBridge({
       session: {
         schemaVersion: SESSION_SCHEMA_VERSION,
@@ -195,7 +178,8 @@ export function webSourceInspector(
         createdAt: Date.now(),
         projectName: path.basename(workspaceRoot),
         canonicalRoots: [sessionRoot],
-        devOrigins: origins,
+        // 协议字段尚未声明 readonly；运行时仍复用同一个冻结 Origin 数组。
+        devOrigins: session.allowedOrigins as string[],
         capabilities: ['vue', 'metadata', 'candidate', 'remote-toggle', 'context-anchor']
       },
       sessionDirectory: getSessionDirectory(),
@@ -350,15 +334,21 @@ export function webSourceInspector(
       });
       const rootKey = createCompilerRootKey(workspaceRoot, sessionSourceKey);
       const browserToken = createBrowserToken();
+      const browserAddressSnapshot = createBrowserAddressSnapshot();
+      const browserAddressPolicy = createBrowserAddressPolicy({
+        mode: options.browserAccess,
+        snapshot: browserAddressSnapshot,
+      });
+      let session!: ActiveViteSession;
       const browserRouter = new BrowserRouter({
         sessionId,
         browserToken,
-        allowRemoteBrowser: options.remoteBrowser,
-        allowedOrigins: () => collectDevOrigins(server, config),
+        browserAddressPolicy,
+        allowedOrigins: () => session.allowedOrigins,
         resolveSource: resolveRecord,
         diagnostics: debug
       });
-      const session: ActiveViteSession = {
+      session = {
         sessionId,
         sessionSourceKey,
         browserToken,
@@ -368,6 +358,10 @@ export function webSourceInspector(
         pendingModules: new Map(),
         moduleBuildIds: new Map(),
         rootKey,
+        browserAddressSnapshot,
+        browserAddressPolicy,
+        allowedOrigins: Object.freeze([]),
+        browserAccessInitialized: false,
         browserRouter,
         serverClosing: false,
       };
@@ -423,8 +417,37 @@ export function webSourceInspector(
       const browserSweepTimer = setInterval(() => session.browserRouter.sweepStalePages(), 30_000);
       browserSweepTimer.unref?.();
 
+      const initializeBrowserAccess = (): boolean => {
+        if (session.serverClosing) {
+          return false;
+        }
+        if (session.browserAccessInitialized) {
+          return true;
+        }
+        try {
+          const context = resolveViteBrowserAccessContext({
+            browserAccess: options.browserAccess,
+            server,
+            config,
+            browserAddressSnapshot: session.browserAddressSnapshot,
+            browserAddressPolicy: session.browserAddressPolicy,
+            diagnostics: debug,
+          });
+          session.browserAddressPolicy = context.browserAddressPolicy;
+          session.allowedOrigins = context.allowedOrigins;
+          session.browserAccessInitialized = true;
+          return context.actualPort !== null || options.browserAccess === 'loopback';
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'BROWSER_ACCESS_INIT_FAILED';
+          config.logger.error(`[wsi] ${message}`);
+          return false;
+        }
+      };
       const start = (): void => {
-        session.bridgeStartPromise ||= startBridge(server, sessionRoot, session).catch((error: unknown) => {
+        if (!initializeBrowserAccess()) {
+          return;
+        }
+        session.bridgeStartPromise ||= startBridge(sessionRoot, session).catch((error: unknown) => {
           config.logger.error(`[wsi] BRIDGE_START_FAILED: ${error instanceof Error ? error.message : 'unknown'}`);
         });
       };
@@ -464,6 +487,8 @@ export function webSourceInspector(
         session.manifest.clear();
         session.pendingModules.clear();
         session.moduleBuildIds.clear();
+        session.allowedOrigins = Object.freeze([]);
+        session.browserAccessInitialized = false;
         session.sessionSourceKey.fill(0);
         session.browserToken = '';
         if (activeSession === session) {

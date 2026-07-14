@@ -35,7 +35,7 @@ interface CommandResult {
   exitCode: number;
 }
 
-const KNOWN_ANSWERS = new Set(['bundler', 'allowedOrigin']);
+const KNOWN_ANSWERS = new Set(['bundler', 'allowedOrigin', 'browserAccess']);
 const MAXIMUM_INTERACTIVE_PLAN_ROUNDS = 8;
 
 function parseArguments(args: readonly string[]): ParsedArguments {
@@ -218,10 +218,15 @@ async function runJson(argumentsValue: ParsedArguments): Promise<CommandResult> 
     };
   }
   if (argumentsValue.command === 'init') {
+    const replayPlan = createIntegrationPlan({
+      workspaceRoot,
+      answers: argumentsValue.answers,
+    });
     const result = await Promise.resolve(applyIntegrationPlan({
       workspaceRoot,
       planDigest: argumentsValue.planDigest ?? '',
-      answers: argumentsValue.answers,
+      // apply 只回放当前 plan 规范化后的答案，缺失或变化会由 digest 校验阻止写入。
+      answers: replayPlan.normalizedAnswers,
     }));
     return {
       envelope: envelope(
@@ -396,7 +401,9 @@ async function main(): Promise<void> {
       );
       process.stdout.write(`${JSON.stringify(failure)}\n`);
     } else {
-      process.stderr.write('Usage: web-source-inspector <init|remove|doctor> [--json --phase <plan|apply>]\n');
+      process.stderr.write(
+        'Usage: web-source-inspector <init|remove|doctor> [--json --phase <plan|apply>] [--answer browserAccess=<loopback|same-machine>]\n',
+      );
     }
     process.exitCode = 1;
     return;

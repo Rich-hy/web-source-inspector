@@ -1,7 +1,11 @@
 import semver from 'semver';
 import { canonicalJson } from '../digest';
 import { normalizeRelativeTarget, type CapturedTarget } from '../filesystem/identity';
-import type { AstOperation } from '../plan/types';
+import type {
+  AstOperation,
+  BrowserAccessMode,
+  BrowserAccessPreviousShape,
+} from '../plan/types';
 import {
   INTEGRATION_STATE_SCHEMA_VERSION,
   INTEGRATION_STATE_PATH,
@@ -16,6 +20,9 @@ const NODE_DETAIL_KEYS = new Set([
   'action',
   'allowedOrigin',
   'binding',
+  'browserAccessMode',
+  'browserAccessOriginalFingerprint',
+  'browserAccessOriginalShape',
   'browserTransport',
   'chainHookOwnership',
   'devServerOwnership',
@@ -39,6 +46,13 @@ const NODE_ACTIONS = new Set([
   'inserted-before-vue-loader',
   'moved-before-vue-loader',
   'wrapped-static-hook',
+]);
+const BROWSER_ACCESS_MODES = new Set<BrowserAccessMode>(['loopback', 'same-machine']);
+const BROWSER_ACCESS_PREVIOUS_SHAPES = new Set<BrowserAccessPreviousShape>([
+  'no-arguments',
+  'property-absent',
+  'loopback',
+  'same-machine',
 ]);
 
 export class IntegrationStateError extends Error {
@@ -80,6 +94,15 @@ function validAnchor(value: string | undefined): boolean {
   return value === undefined || value === 'START' || value === 'END' || validFingerprint(value);
 }
 
+function validBrowserAccessMode(value: unknown): value is BrowserAccessMode {
+  return typeof value === 'string' && BROWSER_ACCESS_MODES.has(value as BrowserAccessMode);
+}
+
+function validBrowserAccessPreviousShape(value: unknown): value is BrowserAccessPreviousShape {
+  return typeof value === 'string'
+    && BROWSER_ACCESS_PREVIOUS_SHAPES.has(value as BrowserAccessPreviousShape);
+}
+
 function validNodeDetails(value: Record<string, unknown>): value is Record<string, string> {
   if (Object.keys(value).some((key) => !NODE_DETAIL_KEYS.has(key))
     || Object.values(value).some((item) => typeof item !== 'string' || item.length === 0)
@@ -90,6 +113,13 @@ function validNodeDetails(value: Record<string, unknown>): value is Record<strin
     || (value.parameter !== undefined
       && (typeof value.parameter !== 'string' || !IDENTIFIER_PATTERN.test(value.parameter)))
     || (value.action !== undefined && !NODE_ACTIONS.has(String(value.action)))
+    || (value.browserAccessMode !== undefined && !validBrowserAccessMode(value.browserAccessMode))
+    || ((value.browserAccessOriginalShape === undefined)
+      !== (value.browserAccessOriginalFingerprint === undefined))
+    || (value.browserAccessOriginalShape !== undefined
+      && !validBrowserAccessPreviousShape(value.browserAccessOriginalShape))
+    || (value.browserAccessOriginalFingerprint !== undefined
+      && !validFingerprint(value.browserAccessOriginalFingerprint))
     || (value.browserTransport !== undefined && value.browserTransport !== 'raw')
     || (value.hookName !== undefined && !['before', 'setupMiddlewares'].includes(String(value.hookName)))
     || (value.module !== undefined && value.module !== 'web-source-inspector/vite')
@@ -207,11 +237,12 @@ function validMovedNodeDetails(
   node: IntegrationStateNode,
   insertedAction: 'inserted-before-vue' | 'inserted-before-vue-loader',
   movedAction: 'moved-before-vue' | 'moved-before-vue-loader',
+  optional: readonly string[] = [],
 ): boolean {
   const action = node.details?.action;
   if (action === insertedAction) {
     return node.ownership === 'created'
-      && hasExactDetailKeys(node, [...COMMON_NODE_DETAIL_KEYS, 'action']);
+      && hasExactDetailKeys(node, [...COMMON_NODE_DETAIL_KEYS, 'action'], optional);
   }
   if (action === movedAction) {
     return node.ownership === 'reused'
@@ -222,11 +253,40 @@ function validMovedNodeDetails(
         'preNext',
         'postPrevious',
         'postNext',
-      ]);
+      ], optional);
   }
   return action === undefined
     && node.ownership === 'reused'
-    && hasExactDetailKeys(node, COMMON_NODE_DETAIL_KEYS);
+    && hasExactDetailKeys(node, COMMON_NODE_DETAIL_KEYS, optional);
+}
+
+const VITE_BROWSER_ACCESS_DETAIL_KEYS = [
+  'browserAccessMode',
+  'browserAccessOriginalShape',
+  'browserAccessOriginalFingerprint',
+] as const;
+
+function validVitePluginDetails(node: IntegrationStateNode): boolean {
+  const details = node.details;
+  const hasOriginalShape = details?.browserAccessOriginalShape !== undefined;
+  const hasOriginalFingerprint = details?.browserAccessOriginalFingerprint !== undefined;
+  if (hasOriginalShape !== hasOriginalFingerprint
+    || (hasOriginalShape && (
+      node.ownership !== 'reused'
+      || details?.browserAccessMode === undefined
+      || !validBrowserAccessPreviousShape(details.browserAccessOriginalShape)
+      || !validFingerprint(details.browserAccessOriginalFingerprint)
+    ))
+    || (details?.browserAccessMode !== undefined
+      && !validBrowserAccessMode(details.browserAccessMode))) {
+    return false;
+  }
+  return validMovedNodeDetails(
+    node,
+    'inserted-before-vue',
+    'moved-before-vue',
+    VITE_BROWSER_ACCESS_DETAIL_KEYS,
+  );
 }
 
 function validTransportHookDetails(node: IntegrationStateNode): boolean {
@@ -257,7 +317,7 @@ function validNodeDetailShape(
       return hasExactDetailKeys(node, [...COMMON_NODE_DETAIL_KEYS, 'module']);
     }
     return node.kind === 'plugin'
-      && validMovedNodeDetails(node, 'inserted-before-vue', 'moved-before-vue');
+      && validVitePluginDetails(node);
   }
   if (node.kind === 'import') {
     return hasExactDetailKeys(node, [...COMMON_NODE_DETAIL_KEYS, 'exported']);
@@ -475,10 +535,72 @@ export function serializeIntegrationState(state: IntegrationState): string {
   return `${JSON.stringify(JSON.parse(canonicalJson(state)), null, 2)}\n`;
 }
 
+function isViteBrowserAccessMutation(
+  operation: AstOperation,
+  browserAccess: BrowserAccessMode | undefined,
+): operation is AstOperation & {
+  controlledMutation: NonNullable<AstOperation['controlledMutation']>;
+} {
+  const mutation = operation.controlledMutation;
+  return operation.kind === 'plugin'
+    && operation.ownership === 'reused'
+    && mutation?.kind === 'vite-browser-access'
+    && browserAccess !== undefined
+    && mutation.targetMode === browserAccess
+    && operation.details?.browserAccessMode === browserAccess
+    && operation.fingerprint === mutation.targetFingerprint
+    && validFingerprint(mutation.previousFingerprint)
+    && validFingerprint(mutation.targetFingerprint)
+    && validBrowserAccessPreviousShape(mutation.previousShape);
+}
+
+function withoutBrowserAccessDetails(
+  details: Readonly<Record<string, string>> | undefined,
+): Record<string, string> {
+  const {
+    browserAccessMode: _browserAccessMode,
+    browserAccessOriginalShape: _browserAccessOriginalShape,
+    browserAccessOriginalFingerprint: _browserAccessOriginalFingerprint,
+    ...rest
+  } = details ?? {};
+  return rest;
+}
+
+function mergeViteBrowserAccessDetails(
+  operation: AstOperation,
+  recorded: IntegrationStateNode,
+): Readonly<Record<string, string>> {
+  const mutation = operation.controlledMutation;
+  if (!mutation || mutation.kind !== 'vite-browser-access') {
+    throw new IntegrationStateError('browserAccess 受控迁移信息无效');
+  }
+  const recordedOriginalShape = recorded.details?.browserAccessOriginalShape;
+  const recordedOriginalFingerprint = recorded.details?.browserAccessOriginalFingerprint;
+  if ((recordedOriginalShape === undefined) !== (recordedOriginalFingerprint === undefined)) {
+    throw new IntegrationStateError('browserAccess 原始恢复信息不完整');
+  }
+  const originalShape = recorded.ownership === 'reused'
+    ? recordedOriginalShape ?? mutation.previousShape
+    : undefined;
+  const originalFingerprint = recorded.ownership === 'reused'
+    ? recordedOriginalFingerprint ?? mutation.previousFingerprint
+    : undefined;
+  return {
+    ...withoutBrowserAccessDetails(recorded.details),
+    ...withoutBrowserAccessDetails(operation.details),
+    browserAccessMode: mutation.targetMode,
+    ...(originalShape && originalFingerprint ? {
+      browserAccessOriginalShape: originalShape,
+      browserAccessOriginalFingerprint: originalFingerprint,
+    } : {}),
+  };
+}
+
 export function preserveRecordedOwnership(
   configPath: string,
   operations: readonly AstOperation[],
   existingState: IntegrationState | null,
+  options: { browserAccess?: BrowserAccessMode } = {},
 ): AstOperation[] {
   if (!existingState) {
     return [...operations];
@@ -489,6 +611,28 @@ export function preserveRecordedOwnership(
   }
   const unmatched = [...recorded];
   return operations.map((operation) => {
+    if (operation.controlledMutation) {
+      if (!isViteBrowserAccessMutation(operation, options.browserAccess)
+        || existingState.profile.bundler !== 'vite') {
+        throw new IntegrationStateError('browserAccess 受控迁移不满足安全条件');
+      }
+      const mutation = operation.controlledMutation;
+      const matches = unmatched.filter((node) => node.kind === 'plugin'
+        && node.fingerprint === mutation.previousFingerprint);
+      if (matches.length !== 1) {
+        throw new IntegrationStateError('browserAccess 旧 fingerprint 与 integration state 不一致');
+      }
+      const match = matches[0] as IntegrationStateNode;
+      if (match.details?.binding !== operation.details?.binding) {
+        throw new IntegrationStateError('browserAccess binding 与 integration state 不一致');
+      }
+      unmatched.splice(unmatched.indexOf(match), 1);
+      return {
+        ...operation,
+        ownership: match.ownership,
+        details: mergeViteBrowserAccessDetails(operation, match),
+      };
+    }
     if (operation.ownership === 'created') {
       throw new IntegrationStateError('已记录配置节点不能在重放时重建');
     }

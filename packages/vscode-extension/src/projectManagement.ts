@@ -33,6 +33,16 @@ interface ProjectCandidate {
 
 const MAXIMUM_PROJECT_MANIFESTS = 200;
 
+type ViteBrowserAccessSelection = 'default' | 'loopback';
+
+async function chooseViteBrowserAccess(): Promise<ViteBrowserAccessSelection | undefined> {
+  const selected = await vscode.window.showQuickPick([
+    { label: '默认：允许本机网卡 IP', value: 'default' as const },
+    { label: '仅本机回环地址', value: 'loopback' as const },
+  ], { placeHolder: '选择 Vite 浏览器访问范围' });
+  return selected?.value;
+}
+
 async function fileExists(uri: vscode.Uri): Promise<boolean> {
   try {
     await vscode.workspace.fs.stat(uri);
@@ -216,7 +226,7 @@ async function loadPlan(
   target: ProjectTarget,
   operation: 'init' | 'remove',
 ): Promise<ResolvedIntegrationPlan | undefined> {
-  const resolved = await resolveIntegrationPlan(
+  let resolved = await resolveIntegrationPlan(
     target.projectRoot,
     operation,
     {},
@@ -224,6 +234,27 @@ async function loadPlan(
   );
   if (!resolved) {
     return undefined;
+  }
+  if (operation === 'init'
+    && resolved.envelopeOk
+    && !resolved.plan.blocked
+    && resolved.plan.profile?.bundler === 'vite') {
+    const browserAccess = await chooseViteBrowserAccess();
+    if (!browserAccess) {
+      return undefined;
+    }
+    if (browserAccess !== 'default') {
+      const browserAccessPlan = await resolveIntegrationPlan(
+        target.projectRoot,
+        operation,
+        { ...resolved.answers, browserAccess },
+        target.trustedWorkspaceRoots,
+      );
+      if (!browserAccessPlan) {
+        return undefined;
+      }
+      resolved = browserAccessPlan;
+    }
   }
   await showIntegrationPlanDiff(target.folder, resolved.plan, target.projectLabel);
   return resolved;
