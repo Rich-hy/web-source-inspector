@@ -16,13 +16,16 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "test": "vitest run --root ../.. packages/compiler-core/src",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@web-source-inspector/protocol": "workspace:*"
+    "@web-source-inspector/protocol": "workspace:*",
+    "semver": "7.7.2"
   },
   "devDependencies": {
     "@types/node": "24.3.1",
+    "@types/semver": "7.7.0",
     "tsup": "catalog:"
   }
 }

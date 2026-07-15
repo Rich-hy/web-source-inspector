@@ -1,6 +1,15 @@
-import { ManifestBuildSupersededError } from '@web-source-inspector/compiler-core';
+import {
+  ManifestBuildSupersededError,
+  canResolveProjectPackageSpecifier,
+  classifyVueFamily,
+  evaluateRawWebpackOrigin,
+  evaluateToolchainCompatibility,
+  findProjectPackageFact,
+} from '@web-source-inspector/compiler-core';
 import { createRequire } from 'node:module';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { resolveVueCompilerAdapter } from '@web-source-inspector/transform-vue';
 
 import { WEBPACK_ADAPTER_NAME } from './constants.js';
 import { WebpackAdapterError } from './errors.js';
@@ -17,7 +26,12 @@ import {
   createWebpackAdapterSession,
   disposeWebpackAdapterSession,
 } from './registry.js';
-import { readBuildMetadata } from './build-metadata.js';
+import { clearBuildMetadata, readBuildMetadata } from './build-metadata.js';
+import {
+  classifyWebpackSource,
+  resolveWebpackWorkspaceRoot,
+  type CanonicalSourceClassification,
+} from './source-boundary.js';
 import type {
   CompilationBuildState,
   WebpackAdapterSession,
@@ -26,12 +40,165 @@ import type {
   WebpackModuleLike,
   WebpackStatsLike,
   WebSourceInspectorWebpackPluginOptions,
+  WsiBuildMetadata,
 } from './types.js';
 import {
   configureLoaderIdentity,
   resolveVueLoaderMajor,
   validateConfiguredVuePipeline,
 } from './vue-rule.js';
+
+function projectRootForCompiler(
+  compiler: WebpackCompilerLike,
+  options: Readonly<WebSourceInspectorWebpackPluginOptions>,
+): string {
+  return path.resolve(
+    options.projectRoot
+      ?? options.root
+      ?? compiler.options?.context
+      ?? compiler.context
+      ?? process.cwd(),
+  );
+}
+
+function declaresWebpackVueToolchain(projectRoot: string): boolean {
+  try {
+    const value: unknown = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return false;
+    }
+    const manifest = value as Record<string, unknown>;
+    const names = ['dependencies', 'devDependencies'].flatMap((field) => {
+      const dependencies = manifest[field];
+      return typeof dependencies === 'object' && dependencies !== null && !Array.isArray(dependencies)
+        ? Object.keys(dependencies)
+        : [];
+    });
+    return names.includes('vue')
+      && (names.includes('webpack')
+        || names.includes('vue-loader')
+        || names.includes('@vue/cli-service'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 真实项目根存在时只相信实际 package facts；无磁盘根的受控测试仍由原有 pipeline 校验覆盖。
+ */
+function preflightWebpackToolchain(
+  compiler: WebpackCompilerLike,
+  options: Readonly<WebSourceInspectorWebpackPluginOptions>,
+): void {
+  const projectRoot = projectRootForCompiler(compiler, options);
+  if (!existsSync(path.join(projectRoot, 'package.json'))
+    || !declaresWebpackVueToolchain(projectRoot)) {
+    return;
+  }
+  const workspaceRoot = resolveWebpackWorkspaceRoot(projectRoot, options.workspaceRoot);
+  const projectAnchor = createProjectPackageAnchor(workspaceRoot, projectRoot);
+  const findFact = (packageName: string) => projectAnchor
+    ? findProjectPackageFact(workspaceRoot, packageName, { anchor: projectAnchor })
+    : undefined;
+  const vue = findFact('vue');
+  const webpack = findFact('webpack');
+  const vueLoader = findFact('vue-loader');
+  const webpackDevServer = findFact('webpack-dev-server');
+  const vueTemplateCompiler = findFact('vue-template-compiler');
+  const vueCompilerSfc = findFact('@vue/compiler-sfc');
+  const vueCompilerDom = findFact('@vue/compiler-dom');
+  const vueFamily = classifyVueFamily(vue?.version);
+  const vueCompilerSfcFromVueAnchor = vueFamily.status === 'supported'
+    && vueFamily.family === 'vue2.7'
+    && canResolveProjectPackageSpecifier(workspaceRoot, 'vue/compiler-sfc', {
+      anchor: vue ? { packageJsonPath: vue.packageJsonPath } : undefined,
+    });
+  const transport = options.browserTransport ?? 'wds';
+  const issues = evaluateToolchainCompatibility({
+    node: {
+      nodeVersion: process.versions.node,
+      toolchainEngineRange: webpack?.engines.node,
+      toolchainName: webpack?.name,
+    },
+    packageManager: 'unknown',
+    vue,
+    bundler: 'webpack',
+    webpack,
+    vueLoader,
+    vueTemplateCompiler,
+    vueCompilerSfc,
+    vueCompilerDom,
+    vueCompilerSfcFromVueAnchor,
+    webpackTransport: transport === 'wds'
+      ? 'webpack-dev-server'
+      : transport === 'raw'
+        ? 'raw-watch'
+        : 'none',
+    webpackDevServer,
+    rawWebpackOrigin: transport === 'raw' ? options.allowedOrigins?.[0] : undefined,
+  });
+  if (transport === 'raw' && options.allowedOrigins) {
+    for (const origin of options.allowedOrigins.slice(1)) {
+      issues.push(...evaluateRawWebpackOrigin(origin));
+    }
+  }
+  const blocking = issues.filter((issue) => issue.severity === 'error');
+  for (const issue of issues) {
+    options.diagnostics?.(issue.code);
+  }
+  if (blocking.length > 0) {
+    throw new WebpackAdapterError(
+      blocking.some((issue) => issue.code === 'RAW_WATCH_HTTPS_UNSUPPORTED')
+        ? 'RAW_WATCH_HTTPS_UNSUPPORTED'
+        : 'TOOLCHAIN_UNSUPPORTED',
+      'Webpack 工具链不满足 Source Inspector 兼容合同。',
+    );
+  }
+  let actualCompiler;
+  try {
+    actualCompiler = resolveVueCompilerAdapter({
+      projectRoot,
+      vueVersion: options.vueVersion,
+    });
+  } catch {
+    throw new WebpackAdapterError(
+      'TOOLCHAIN_UNSUPPORTED',
+      '无法证明实际 Vue compiler 与 Vue 版本一致。',
+    );
+  }
+  if (options.vueCompiler
+    && (options.vueCompiler.family !== actualCompiler.family
+      || options.vueCompiler.version !== actualCompiler.version)) {
+    throw new WebpackAdapterError(
+      'TOOLCHAIN_UNSUPPORTED',
+      '显式 Vue compiler 与实际项目 Vue 版本不一致。',
+    );
+  }
+}
+
+/** 只允许已确认 workspace 内的项目 package.json 作为 package facts 的查找锚点。 */
+function createProjectPackageAnchor(
+  workspaceRoot: string,
+  projectRoot: string,
+): { packageJsonPath: string } | undefined {
+  try {
+    const canonicalWorkspaceRoot = realpathSync.native(workspaceRoot);
+    const canonicalProjectRoot = realpathSync.native(projectRoot);
+    const projectManifest = path.join(canonicalProjectRoot, 'package.json');
+    const relativePath = path.relative(canonicalWorkspaceRoot, projectManifest);
+    if (
+      !relativePath
+      || path.isAbsolute(relativePath)
+      || path.basename(relativePath) !== 'package.json'
+      || relativePath.split(/[\\/]/u).some((segment) => !segment || segment === '.' || segment === '..')
+    ) {
+      return undefined;
+    }
+    return { packageJsonPath: relativePath.split(path.sep).join('/') };
+  } catch {
+    return undefined;
+  }
+}
 
 export class WebSourceInspectorWebpackPlugin {
   static readonly loaderPath: string = webpackLoaderPath;
@@ -72,6 +239,7 @@ export class WebSourceInspectorWebpackPlugin {
     if (finalMode !== 'development') {
       return;
     }
+    preflightWebpackToolchain(compiler, this.#options);
     const vueLoaderMajor = resolveVueLoaderMajor(compiler, this.#options.vueLoaderMajor);
     const compilerVersion = resolveCompilerVersion(compiler);
     const session = createWebpackAdapterSession(
@@ -280,16 +448,27 @@ function collectCompilationMetadata(
       if (isVueLoaderPitcherModule(webpackModule)) {
         continue;
       }
-      const metadata = readBuildMetadata(webpackModule, session);
-      if (!metadata) {
-        if (isHtmlVueTemplateModule(webpackModule, session)) {
-          throw new WebpackAdapterError(
-            'TEMPLATE_PIPELINE_MISMATCH',
-            'template module 缺少 WSI build metadata；可能命中了未恢复 metadata 的旧缓存',
-          );
-        }
+      const templateResource = getInspectableTemplateResource(webpackModule, session);
+      if (!templateResource) {
+        clearBuildMetadata(webpackModule);
         continue;
       }
+      const sourceClassification = classifyWebpackSource(
+        session.sourceBoundary,
+        templateResource,
+      );
+      if (sourceClassification.kind !== 'inspectable') {
+        clearBuildMetadata(webpackModule);
+        continue;
+      }
+      const metadata = readBuildMetadata(webpackModule, session);
+      if (!metadata) {
+        throw new WebpackAdapterError(
+          'TEMPLATE_PIPELINE_MISMATCH',
+          'template module 缺少 WSI build metadata；可能命中了未恢复 metadata 的旧缓存',
+        );
+      }
+      assertMetadataSourceBoundary(metadata, sourceClassification);
       build.stage.stageModule({
         moduleId: metadata.moduleId,
         generation: metadata.generation,
@@ -321,23 +500,38 @@ function isVueLoaderPitcherModule(webpackModule: WebpackModuleLike): boolean {
   }) ?? false;
 }
 
-function isHtmlVueTemplateModule(
+function getInspectableTemplateResource(
   webpackModule: WebpackModuleLike,
   session: WebpackAdapterSession,
-): boolean {
-  const identity = webpackModule.resource ?? webpackModule.identifier?.();
-  if (!identity) {
-    return false;
+): string | null {
+  const resource = webpackModule.resource;
+  if (!resource) {
+    return null;
   }
-  const queryStart = identity.lastIndexOf('?');
+  const queryStart = resource.lastIndexOf('?');
   if (queryStart < 0) {
-    return false;
+    return null;
   }
-  const query = parseVueTemplateQuery(identity.slice(queryStart), session.vueLoaderMajor);
+  const query = parseVueTemplateQuery(resource.slice(queryStart), session.vueLoaderMajor);
   if (!query) {
-    return false;
+    return null;
   }
-  return isInspectableHtmlTemplateQuery(query);
+  return isInspectableHtmlTemplateQuery(query) ? resource.slice(0, queryStart) : null;
+}
+
+function assertMetadataSourceBoundary(
+  metadata: WsiBuildMetadata,
+  sourceClassification: Extract<CanonicalSourceClassification, { kind: 'inspectable' }>,
+): void {
+  if (
+    metadata.moduleId !== sourceClassification.relativePath
+    || metadata.records.some((record) => record.relativePath !== sourceClassification.relativePath)
+  ) {
+    throw new WebpackAdapterError(
+      'TEMPLATE_PIPELINE_MISMATCH',
+      'template module WSI metadata 与 canonical source boundary 不一致',
+    );
+  }
 }
 
 function finishCompilation(session: WebpackAdapterSession, stats: WebpackStatsLike): void {

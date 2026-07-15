@@ -1,7 +1,25 @@
-import { createRequire } from 'node:module';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import semver from 'semver';
+import {
+  canResolveProjectPackageSpecifier,
+  classifyVueFamily,
+  evaluateNodeCompatibility,
+  evaluatePackageManagerCompatibility,
+  evaluateToolchainCompatibility,
+  evaluateVueCompatibility,
+  expectedViteVuePlugin,
+  findProjectPackageFact,
+  parseStrictSemVer,
+  sortCompatibilityIssues,
+  type CompatibilityIssue,
+  type PackageCompatibilityFact,
+  type PackageManagerKind,
+  type ProjectPackageAnchor,
+  type ResolvedProjectPackageFact,
+  type SupportedBundlerKind,
+  type VueFamily as CompatibilityVueFamily,
+  type WebpackTransportKind,
+} from '@web-source-inspector/compiler-core';
 import type {
   AdapterKind,
   ConfigModuleKind,
@@ -11,7 +29,9 @@ import type {
   PackageManager,
   ProjectDiagnostic,
   ProjectProfile,
+  ProjectTransport,
   RequiredInput,
+  VueFamily,
 } from '../types';
 
 const VITE_CONFIG_NAMES = [
@@ -35,6 +55,13 @@ const WEBPACK_CONFIG_NAMES = [
 interface PackageManifest {
   type?: string;
   scripts?: Record<string, string>;
+  packageManager?: string;
+}
+
+interface PackageResolution {
+  fact?: ResolvedProjectPackageFact;
+  detected?: DetectedPackage;
+  anchor?: ProjectPackageAnchor;
 }
 
 function readJsonObject(filePath: string): Record<string, unknown> | undefined {
@@ -48,90 +75,30 @@ function readJsonObject(filePath: string): Record<string, unknown> | undefined {
   }
 }
 
-function isWorkspacePath(workspaceRoot: string, filePath: string): boolean {
-  const relative = path.relative(workspaceRoot, filePath);
-  return Boolean(relative)
-    && !path.isAbsolute(relative)
-    && relative !== '..'
-    && !relative.startsWith(`..${path.sep}`);
-}
-
-function toWireRelativePath(workspaceRoot: string, filePath: string): string {
-  const relative = path.relative(workspaceRoot, filePath).split(path.sep).join('/');
-  if (!relative || path.isAbsolute(relative) || relative === '..' || relative.startsWith('../')) {
-    throw new Error('PACKAGE_PATH_OUTSIDE_WORKSPACE');
-  }
-  return relative;
-}
-
-function resolvePackage(
-  workspaceRoot: string,
-  baseManifestPath: string,
-  packageName: string,
-): DetectedPackage | undefined {
-  const logicalPackageJsonPath = path.join(
-    path.dirname(baseManifestPath),
-    'node_modules',
-    ...packageName.split('/'),
-    'package.json',
-  );
-  const projectRequire = createRequire(baseManifestPath);
-  let packageJsonPath: string | undefined;
-  if (existsSync(logicalPackageJsonPath)) {
-    // 保留 workspace 内的逻辑依赖路径，避免 pnpm Junction 泄漏物理存储绝对路径。
-    packageJsonPath = logicalPackageJsonPath;
-  } else {
-    try {
-      packageJsonPath = projectRequire.resolve(`${packageName}/package.json`);
-    } catch {
-      try {
-        let current = path.dirname(projectRequire.resolve(packageName));
-        while (path.dirname(current) !== current) {
-          const candidate = path.join(current, 'package.json');
-          const manifest = readJsonObject(candidate);
-          if (manifest?.name === packageName) {
-            packageJsonPath = candidate;
-            break;
-          }
-          current = path.dirname(current);
-        }
-      } catch {
-        return undefined;
-      }
-    }
-  }
-  if (!packageJsonPath || !isWorkspacePath(workspaceRoot, packageJsonPath)) {
+function packageManagerFromField(value: unknown): PackageManager | undefined {
+  if (typeof value !== 'string') {
     return undefined;
   }
-  const manifest = readJsonObject(packageJsonPath);
-  if (typeof manifest?.version !== 'string') {
-    return undefined;
+  const name = value.split('@', 1)[0];
+  if (name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') {
+    return name;
   }
-  return {
-    name: packageName,
-    version: manifest.version,
-    packageJsonPath: toWireRelativePath(workspaceRoot, packageJsonPath),
-  };
+  return undefined;
 }
 
-function resolveVueCompilerSubpath(
-  workspaceRoot: string,
-  packageManifestPath: string,
-  vue: DetectedPackage,
-): DetectedPackage | undefined {
-  try {
-    createRequire(packageManifestPath).resolve('vue/compiler-sfc');
-    return {
-      name: 'vue/compiler-sfc',
-      version: vue.version,
-      packageJsonPath: vue.packageJsonPath,
-    };
-  } catch {
-    return undefined;
+function detectPackageManager(workspaceRoot: string, manifest: PackageManifest): PackageManager {
+  if (existsSync(path.join(workspaceRoot, '.pnp.cjs'))
+    || existsSync(path.join(workspaceRoot, '.pnp.js'))) {
+    return 'yarn-pnp';
   }
-}
-
-function detectPackageManager(workspaceRoot: string): PackageManager {
+  if (existsSync(path.join(workspaceRoot, 'bun.lockb'))
+    || existsSync(path.join(workspaceRoot, 'bun.lock'))) {
+    return 'bun';
+  }
+  const declared = packageManagerFromField(manifest.packageManager);
+  if (declared) {
+    return declared;
+  }
   if (existsSync(path.join(workspaceRoot, 'pnpm-lock.yaml'))) {
     return 'pnpm';
   }
@@ -175,42 +142,271 @@ function detectCommands(scripts: Record<string, string> | undefined): DevCommand
   return candidates;
 }
 
-function diagnostic(
+function toDetectedPackage(fact: ResolvedProjectPackageFact | undefined): DetectedPackage | undefined {
+  if (!fact || typeof fact.version !== 'string') {
+    return undefined;
+  }
+  return {
+    name: fact.name,
+    version: fact.version,
+    packageJsonPath: fact.packageJsonPath,
+  };
+}
+
+function resolvePackage(
+  workspaceRoot: string,
+  packageName: string,
+  anchor?: ProjectPackageAnchor,
+): PackageResolution {
+  const fact = findProjectPackageFact(
+    workspaceRoot,
+    packageName,
+    anchor ? { anchor } : undefined,
+  );
+  return {
+    fact,
+    detected: toDetectedPackage(fact),
+    ...(fact ? { anchor: { packageJsonPath: fact.packageJsonPath } } : {}),
+  };
+}
+
+function resolveFromOwners(
+  workspaceRoot: string,
+  packageName: string,
+  owners: readonly PackageResolution[],
+): PackageResolution {
+  const rootResolution = resolvePackage(workspaceRoot, packageName);
+  if (rootResolution.fact) {
+    return rootResolution;
+  }
+  for (const owner of owners) {
+    if (!owner.anchor) {
+      continue;
+    }
+    const resolved = resolvePackage(workspaceRoot, packageName, owner.anchor);
+    if (resolved.fact) {
+      return resolved;
+    }
+  }
+  return rootResolution;
+}
+
+function canResolveVueCompilerSubpath(
+  workspaceRoot: string,
+  vue: PackageResolution,
+): boolean {
+  return Boolean(vue.anchor
+    && canResolveProjectPackageSpecifier(workspaceRoot, 'vue/compiler-sfc', {
+      anchor: vue.anchor,
+    }));
+}
+
+function virtualVueCompiler(
+  vue: PackageResolution,
+): { fact?: PackageCompatibilityFact; detected?: DetectedPackage } {
+  if (!vue.fact || !vue.detected) {
+    return {};
+  }
+  return {
+    fact: {
+      name: 'vue/compiler-sfc',
+      version: vue.fact.version,
+      peerDependencies: vue.fact.peerDependencies,
+      engines: vue.fact.engines,
+    },
+    detected: {
+      name: 'vue/compiler-sfc',
+      version: vue.detected.version,
+      packageJsonPath: vue.detected.packageJsonPath,
+    },
+  };
+}
+
+function addDiagnostic(
   diagnostics: ProjectDiagnostic[],
   code: string,
   message: string,
   blocking = true,
 ): void {
-  diagnostics.push({ code, message, blocking, severity: blocking ? 'error' : 'warning' });
+  diagnostics.push({
+    code,
+    message,
+    blocking,
+    severity: blocking ? 'error' : 'warning',
+  });
 }
 
-function sameMajorMinor(left: string, right: string): boolean {
-  const leftVersion = semver.coerce(left);
-  const rightVersion = semver.coerce(right);
-  return Boolean(leftVersion && rightVersion
-    && leftVersion.major === rightVersion.major
-    && leftVersion.minor === rightVersion.minor);
+function issueToDiagnostic(issue: CompatibilityIssue): ProjectDiagnostic {
+  const message = issue.subject
+    + '：检测到 ' + issue.detected
+    + '；要求 ' + issue.required
+    + '。' + issue.remediation;
+  return {
+    code: issue.code,
+    message,
+    blocking: issue.severity === 'error',
+    severity: issue.severity,
+  };
 }
 
-function sameExactVersion(left: string, right: string): boolean {
-  const leftVersion = semver.coerce(left);
-  const rightVersion = semver.coerce(right);
-  return Boolean(leftVersion && rightVersion && semver.eq(leftVersion, rightVersion));
-}
-
-function validExactOrigin(value: string | undefined): boolean {
-  if (!value) {
-    return false;
+function projectVueFamily(
+  family: CompatibilityVueFamily | undefined,
+): VueFamily | undefined {
+  if (family === 'vue2.6') {
+    return 'vue-2.6';
   }
-  try {
-    const url = new URL(value);
-    return (url.protocol === 'http:' || url.protocol === 'https:')
-      && url.origin === value
-      && !url.username
-      && !url.password;
-  } catch {
-    return false;
+  if (family === 'vue2.7') {
+    return 'vue-2.7';
   }
+  if (family === 'vue3') {
+    return 'vue-3';
+  }
+  return undefined;
+}
+
+function selectedBundler(
+  candidates: SupportedBundlerKind[],
+  answers: Readonly<Record<string, string>> | undefined,
+  requiredInputs: RequiredInput[],
+): ProjectProfile['bundler'] {
+  if (candidates.length === 0) {
+    return 'unsupported';
+  }
+  if (candidates.length === 1) {
+    return candidates[0] as SupportedBundlerKind;
+  }
+  const requested = answers?.bundler;
+  if (requested === 'vite' || requested === 'webpack' || requested === 'vue-cli') {
+    if (candidates.includes(requested)) {
+      return requested;
+    }
+  }
+  requiredInputs.push({
+    questionId: 'bundler',
+    type: 'choice',
+    message: '检测到多个开发入口，请选择要接入的 Bundler。',
+    choices: [...candidates],
+  });
+  return 'ambiguous';
+}
+
+function selectedWebpackTransport(
+  bundler: ProjectProfile['bundler'],
+  devCommands: readonly DevCommandCandidate[],
+  answers: Readonly<Record<string, string>> | undefined,
+  requiredInputs: RequiredInput[],
+): ProjectTransport {
+  if (bundler === 'vite') {
+    return 'vite';
+  }
+  if (bundler === 'vue-cli') {
+    return 'wds';
+  }
+  if (bundler !== 'webpack') {
+    return 'unknown';
+  }
+  const usesWds = devCommands.some((command) =>
+    command.bundler === 'webpack'
+    && /(?:webpack-dev-server|webpack\s+serve)\b/u.test(command.command));
+  const usesRawWatch = devCommands.some((command) =>
+    command.bundler === 'webpack'
+    && /(?:--watch|-w)(?:\s|$)/u.test(command.command));
+  if (usesWds && usesRawWatch) {
+    const requested = answers?.transport;
+    if (requested === 'wds' || requested === 'raw-watch') {
+      return requested;
+    }
+    requiredInputs.push({
+      questionId: 'transport',
+      type: 'choice',
+      message: '检测到 webpack-dev-server 和 raw watch，请选择页面使用的 transport。',
+      choices: ['wds', 'raw-watch'],
+    });
+    return 'ambiguous';
+  }
+  if (usesWds) {
+    return 'wds';
+  }
+  if (usesRawWatch) {
+    return 'raw-watch';
+  }
+  return 'unknown';
+}
+
+function compilerResolution(
+  workspaceRoot: string,
+  vue: PackageResolution,
+  family: CompatibilityVueFamily | undefined,
+  owners: readonly PackageResolution[],
+): {
+  vueTemplateCompiler: PackageResolution;
+  vueCompilerSfc: PackageResolution;
+  vueCompilerDom: PackageResolution;
+  vueCompilerSfcFromVueAnchor: boolean;
+  primary?: DetectedPackage;
+  dom?: DetectedPackage;
+} {
+  const vueTemplateCompiler = resolvePackage(workspaceRoot, 'vue-template-compiler');
+  const vueCompilerSfc = resolveFromOwners(workspaceRoot, '@vue/compiler-sfc', owners);
+  const vueCompilerDom = resolveFromOwners(workspaceRoot, '@vue/compiler-dom', owners);
+  const vueCompilerSfcFromVueAnchor = family === 'vue2.7'
+    && canResolveVueCompilerSubpath(workspaceRoot, vue);
+  const virtualSfc = vueCompilerSfcFromVueAnchor ? virtualVueCompiler(vue) : {};
+  const primary = family === 'vue2.6'
+    ? vueTemplateCompiler.detected
+    : family === 'vue2.7'
+      ? virtualSfc.detected
+      : vueCompilerSfc.detected;
+  return {
+    vueTemplateCompiler,
+    vueCompilerSfc,
+    vueCompilerDom,
+    vueCompilerSfcFromVueAnchor,
+    primary,
+    dom: family === 'vue3' ? vueCompilerDom.detected : undefined,
+  };
+}
+
+function configFiles(workspaceRoot: string, packageType: string | undefined): ProjectProfile['configFiles'] {
+  const names = [
+    ...VITE_CONFIG_NAMES,
+    ...WEBPACK_CONFIG_NAMES,
+    'vue.config.js',
+    'vue.config.cjs',
+    'vue.config.mjs',
+    'vue.config.ts',
+  ];
+  return names
+    .filter((fileName) => existsSync(path.join(workspaceRoot, fileName)))
+    .map((fileName) => ({ path: fileName, moduleKind: moduleKind(fileName, packageType) }));
+}
+
+function engineFactForBundler(
+  bundler: ProjectProfile['bundler'],
+  vite: PackageResolution,
+  webpack: PackageResolution,
+  vueCli: PackageResolution,
+): PackageResolution | undefined {
+  if (bundler === 'vite') {
+    return vite;
+  }
+  if (bundler === 'webpack') {
+    return webpack;
+  }
+  if (bundler === 'vue-cli') {
+    return vueCli;
+  }
+  return undefined;
+}
+
+function transportForEvaluator(transport: ProjectTransport): WebpackTransportKind {
+  if (transport === 'wds') {
+    return 'webpack-dev-server';
+  }
+  if (transport === 'raw-watch') {
+    return 'raw-watch';
+  }
+  return 'none';
 }
 
 export function detectProject(options: DetectProjectOptions): ProjectProfile {
@@ -223,188 +419,149 @@ export function detectProject(options: DetectProjectOptions): ProjectProfile {
   const manifest = rawManifest as PackageManifest;
   const diagnostics: ProjectDiagnostic[] = [];
   const requiredInputs: RequiredInput[] = [];
-  const resolve = (name: string): DetectedPackage | undefined => (
-    resolvePackage(workspaceRoot, packageManifestPath, name)
-  );
-  const resolveFrom = (
-    owner: DetectedPackage | undefined,
-    name: string,
-  ): DetectedPackage | undefined => {
-    if (!owner) {
-      return undefined;
-    }
-    const ownerManifest = path.resolve(workspaceRoot, owner.packageJsonPath);
-    return resolvePackage(workspaceRoot, ownerManifest, name);
-  };
-  const vue = resolve('vue');
-  const vueCliService = resolve('@vue/cli-service');
-  const vite = resolve('vite');
-  const webpack = resolve('webpack') ?? resolveFrom(vueCliService, 'webpack');
-  const vueLoader = resolve('vue-loader') ?? resolveFrom(vueCliService, 'vue-loader');
-  const webpackDevServer = resolve('webpack-dev-server')
-    ?? resolveFrom(vueCliService, 'webpack-dev-server');
-  const viteVue3Plugin = resolve('@vitejs/plugin-vue');
-  const viteVue27Plugin = resolve('@vitejs/plugin-vue2');
-  const viteVue26Plugin = resolve('vite-plugin-vue2');
+  const packageManager = detectPackageManager(workspaceRoot, manifest);
+
+  const vue = resolvePackage(workspaceRoot, 'vue');
+  const vueCliService = resolvePackage(workspaceRoot, '@vue/cli-service');
+  const vite = resolvePackage(workspaceRoot, 'vite');
+  const webpack = resolveFromOwners(workspaceRoot, 'webpack', [vueCliService]);
+  const vueLoader = resolveFromOwners(workspaceRoot, 'vue-loader', [vueCliService]);
+  const webpackDevServer = resolveFromOwners(workspaceRoot, 'webpack-dev-server', [vueCliService]);
+  const viteVue3Plugin = resolvePackage(workspaceRoot, '@vitejs/plugin-vue');
+  const viteVue27Plugin = resolvePackage(workspaceRoot, '@vitejs/plugin-vue2');
+  const viteVue26Plugin = resolvePackage(workspaceRoot, 'vite-plugin-vue2');
   const devCommands = detectCommands(manifest.scripts);
-  const configNames = [
-    ...VITE_CONFIG_NAMES,
-    ...WEBPACK_CONFIG_NAMES,
-    'vue.config.js',
-    'vue.config.cjs',
-    'vue.config.mjs',
-    'vue.config.ts',
-  ];
-  const configFiles = configNames
-    .filter((fileName) => existsSync(path.join(workspaceRoot, fileName)))
-    .map((fileName) => ({ path: fileName, moduleKind: moduleKind(fileName, manifest.type) }));
+  const detectedConfigFiles = configFiles(workspaceRoot, manifest.type);
 
-  const hasVite = Boolean(vite && (configFiles.some((item) => item.path.startsWith('vite.config.'))
-    || devCommands.some((item) => item.bundler === 'vite')));
-  const hasVueCli = Boolean(vueCliService && (configFiles.some((item) => item.path.startsWith('vue.config.'))
-    || devCommands.some((item) => item.bundler === 'vue-cli')));
-  const hasWebpack = Boolean(webpack && (configFiles.some((item) => item.path.startsWith('webpack.config.'))
-    || devCommands.some((item) => item.bundler === 'webpack')));
-
-  let bundler: ProjectProfile['bundler'] = 'unsupported';
-  if (hasVueCli) {
-    bundler = 'vue-cli';
-  } else if (hasVite && hasWebpack) {
-    const selected = options.answers?.bundler;
-    if (selected === 'vite' || selected === 'webpack') {
-      bundler = selected;
-    } else {
-      bundler = 'ambiguous';
-      requiredInputs.push({
-        questionId: 'bundler',
-        type: 'choice',
-        message: '检测到 Vite 与 Webpack，请选择要接入的开发入口。',
-        choices: ['vite', 'webpack'],
-      });
-    }
-  } else if (hasVite) {
-    bundler = 'vite';
-  } else if (hasWebpack) {
-    bundler = 'webpack';
+  const candidates: SupportedBundlerKind[] = [];
+  if (vite.fact && (detectedConfigFiles.some((item) => item.path.startsWith('vite.config.'))
+    || devCommands.some((item) => item.bundler === 'vite'))) {
+    candidates.push('vite');
   }
-
-  if (!vue) {
-    diagnostic(diagnostics, 'VUE_NOT_INSTALLED', '未从项目解析到 Vue。');
+  if (webpack.fact && (detectedConfigFiles.some((item) => item.path.startsWith('webpack.config.'))
+    || devCommands.some((item) => item.bundler === 'webpack'))) {
+    candidates.push('webpack');
   }
-  const vueVersion = vue ? semver.coerce(vue.version) : null;
-  if (vueVersion && !(
-    (vueVersion.major === 2 && vueVersion.minor >= 6)
-    || (vueVersion.major === 3 && vueVersion.minor >= 2)
-  )) {
-    diagnostic(diagnostics, 'VUE_VERSION_UNSUPPORTED', `不支持 Vue ${vue?.version ?? 'unknown'}。`);
+  if (vueCliService.fact && (detectedConfigFiles.some((item) => item.path.startsWith('vue.config.'))
+    || devCommands.some((item) => item.bundler === 'vue-cli'))) {
+    candidates.push('vue-cli');
   }
-
-  let adapter: AdapterKind | undefined;
-  let viteVuePlugin: DetectedPackage | undefined;
-  let vueCompiler: DetectedPackage | undefined;
-  if (vue && vueVersion) {
-    if (bundler === 'vite') {
-      adapter = vueVersion.major === 2 ? 'vite-vue2' : 'vite-vue3';
-      if (!vite || !semver.satisfies(vite.version, '>=2 <7')) {
-        diagnostic(diagnostics, 'VITE_VERSION_UNSUPPORTED', `不支持 Vite ${vite?.version ?? 'unknown'}。`);
-      }
-      if (vueVersion.major === 2 && vueVersion.minor === 6) {
-        viteVuePlugin = viteVue26Plugin;
-        vueCompiler = resolve('vue-template-compiler');
-      } else if (vueVersion.major === 2) {
-        viteVuePlugin = viteVue27Plugin;
-        vueCompiler = resolveVueCompilerSubpath(workspaceRoot, packageManifestPath, vue);
-      } else {
-        viteVuePlugin = viteVue3Plugin;
-        vueCompiler = resolve('@vue/compiler-sfc')
-          ?? resolveVueCompilerSubpath(workspaceRoot, packageManifestPath, vue)
-          ?? resolveFrom(viteVue3Plugin, '@vue/compiler-sfc');
-      }
-      if (!viteVuePlugin) {
-        diagnostic(diagnostics, 'VITE_VUE_PLUGIN_MISSING', '未解析到与 Vue 版本匹配的 Vite Vue plugin。');
-      }
-    } else if (bundler === 'webpack' || bundler === 'vue-cli') {
-      adapter = vueVersion.major === 2 ? 'webpack-vue2' : 'webpack-vue3';
-      if (!webpack || !semver.satisfies(webpack.version, '>=4 <6')) {
-        diagnostic(diagnostics, 'WEBPACK_VERSION_UNSUPPORTED', `不支持 Webpack ${webpack?.version ?? 'unknown'}。`);
-      }
-      const loaderMajor = vueLoader ? semver.major(semver.coerce(vueLoader.version) ?? '0.0.0') : 0;
-      if (!vueLoader || (vueVersion.major === 2 ? loaderMajor !== 15 : ![16, 17].includes(loaderMajor))) {
-        diagnostic(diagnostics, 'VUE_LOADER_VERSION_MISMATCH', 'vue-loader 主版本与 Vue 不匹配。');
-      }
-      vueCompiler = vueVersion.major === 2
-        ? (vueVersion.minor === 6
-          ? resolve('vue-template-compiler')
-          : resolveVueCompilerSubpath(workspaceRoot, packageManifestPath, vue))
-        : (resolve('@vue/compiler-sfc')
-          ?? resolveVueCompilerSubpath(workspaceRoot, packageManifestPath, vue)
-          ?? resolveFrom(vueLoader, '@vue/compiler-sfc'));
-    }
-  }
-
-  const compilerVersionMatches = vue && vueVersion && vueCompiler
-    ? (vueVersion.major === 2 && vueVersion.minor === 6
-      ? sameExactVersion(vue.version, vueCompiler.version)
-      : sameMajorMinor(vue.version, vueCompiler.version))
-    : true;
-  if (vue && vueCompiler && vueCompiler.name !== 'vue/compiler-sfc'
-    && !compilerVersionMatches) {
-    diagnostic(diagnostics, 'VUE_COMPILER_VERSION_MISMATCH', 'Vue 与 template compiler 版本不匹配。');
-  } else if (vue && adapter && !vueCompiler) {
-    diagnostic(diagnostics, 'VUE_COMPILER_MISSING', '未解析到项目实际使用的 Vue template compiler。');
-  }
-
-  if (vueCliService && !semver.satisfies(vueCliService.version, '>=3 <6')) {
-    diagnostic(diagnostics, 'VUE_CLI_VERSION_UNSUPPORTED', `不支持 Vue CLI ${vueCliService.version}。`);
-  }
-  if (webpackDevServer) {
-    const wdsVersion = semver.coerce(webpackDevServer.version);
-    if (!wdsVersion || (wdsVersion.major !== 3 && !(wdsVersion.major === 4 && semver.gte(wdsVersion, '4.7.0')))) {
-      diagnostic(diagnostics, 'WDS_TRANSPORT_UNSUPPORTED', `不支持 webpack-dev-server ${webpackDevServer.version}。`);
-    }
-  }
-
-  if (bundler === 'vue-cli' && !webpackDevServer) {
-    diagnostic(
+  const bundler = selectedBundler(candidates, options.answers, requiredInputs);
+  const transport = selectedWebpackTransport(bundler, devCommands, options.answers, requiredInputs);
+  if (bundler === 'webpack' && transport === 'unknown') {
+    addDiagnostic(
       diagnostics,
-      'WDS_TRANSPORT_UNSUPPORTED',
-      'Vue CLI 项目未解析到受支持的 webpack-dev-server。',
+      'WEBPACK_TRANSPORT_AMBIGUOUS',
+      '未能从开发脚本证明 Webpack 页面使用 webpack-dev-server 或 raw watch。',
     );
   }
-
-  const webpackUsesDevServer = devCommands.some((item) =>
-    item.bundler === 'webpack'
-    && /(?:webpack-dev-server|webpack\s+serve)\b/u.test(item.command));
-  const rawWebpackWatch = bundler === 'webpack' && !webpackUsesDevServer
-    && devCommands.some((item) => item.bundler === 'webpack' && item.continuous);
-  if (rawWebpackWatch && !validExactOrigin(options.answers?.allowedOrigin)) {
+  if (transport === 'raw-watch' && options.answers?.allowedOrigin === undefined) {
     requiredInputs.push({
       questionId: 'allowedOrigin',
       type: 'origin',
-      message: '请输入 raw Webpack 页面使用的精确 HTTP(S) Origin。',
+      message: '请输入 raw Webpack 页面使用的精确 HTTP Origin。',
     });
   }
-  if (bundler === 'unsupported') {
-    diagnostic(diagnostics, 'BUNDLER_NOT_DETECTED', '未识别到支持的 Vite、Vue CLI 或 Webpack 开发入口。');
+
+  const vueClassification = classifyVueFamily(vue.fact?.version);
+  const expectedPlugin = vueClassification.status === 'supported'
+    ? expectedViteVuePlugin(vueClassification.family)
+    : undefined;
+  const viteVuePlugin = expectedPlugin?.name === '@vitejs/plugin-vue'
+    ? viteVue3Plugin
+    : expectedPlugin?.name === '@vitejs/plugin-vue2'
+      ? viteVue27Plugin
+      : expectedPlugin?.name === 'vite-plugin-vue2'
+        ? viteVue26Plugin
+        : {};
+  const compiler = compilerResolution(
+    workspaceRoot,
+    vue,
+    vueClassification.status === 'supported' ? vueClassification.family : undefined,
+    [viteVuePlugin, vueLoader],
+  );
+
+  let adapter: AdapterKind | undefined;
+  if (vueClassification.status === 'supported'
+    && (bundler === 'vite' || bundler === 'webpack' || bundler === 'vue-cli')) {
+    adapter = bundler === 'vite'
+      ? (vueClassification.family === 'vue3' ? 'vite-vue3' : 'vite-vue2')
+      : (vueClassification.family === 'vue3' ? 'webpack-vue3' : 'webpack-vue2');
   }
 
+  const engineOwner = engineFactForBundler(bundler, vite, webpack, vueCliService);
+  const compatibilityIssues = bundler === 'vite' || bundler === 'webpack' || bundler === 'vue-cli'
+    ? evaluateToolchainCompatibility({
+      node: {
+        nodeVersion: process.versions.node,
+        toolchainEngineRange: engineOwner?.fact?.engines.node,
+        toolchainName: engineOwner?.fact?.name,
+      },
+      packageManager: packageManager as PackageManagerKind,
+      vue: vue.fact,
+      bundler,
+      vite: vite.fact,
+      viteVuePlugin: viteVuePlugin.fact,
+      webpack: webpack.fact,
+      vueCli: vueCliService.fact,
+      vueLoader: vueLoader.fact,
+      vueTemplateCompiler: compiler.vueTemplateCompiler.fact,
+      vueCompilerSfc: compiler.vueCompilerSfc.fact,
+      vueCompilerDom: compiler.vueCompilerDom.fact,
+      vueCompilerSfcFromVueAnchor: compiler.vueCompilerSfcFromVueAnchor,
+      webpackTransport: transportForEvaluator(transport),
+      webpackDevServer: webpackDevServer.fact,
+      rawWebpackOrigin: options.answers?.allowedOrigin,
+    })
+    : sortCompatibilityIssues([
+      ...evaluateNodeCompatibility({ nodeVersion: process.versions.node }),
+      ...evaluatePackageManagerCompatibility(packageManager as PackageManagerKind),
+      ...evaluateVueCompatibility(vue.fact),
+    ]);
+  diagnostics.push(...compatibilityIssues.map(issueToDiagnostic));
+  if (bundler === 'unsupported') {
+    addDiagnostic(
+      diagnostics,
+      'BUNDLER_NOT_DETECTED',
+      '未识别到支持的 Vite、Webpack 或 Vue CLI 开发入口。',
+    );
+  }
+
+  const viteVersion = parseStrictSemVer(vite.fact?.version);
+  const webpackVersion = parseStrictSemVer(webpack.fact?.version);
+  const vueLoaderVersion = parseStrictSemVer(vueLoader.fact?.version);
+  const wdsVersion = parseStrictSemVer(webpackDevServer.fact?.version);
   return {
     schemaVersion: 1,
     workspaceRoot: '.',
-    packageManager: detectPackageManager(workspaceRoot),
+    packageManager,
     packageManifest: 'package.json',
-    vue,
-    vite,
-    viteVuePlugin,
-    webpack,
-    vueCliService,
-    vueLoader,
-    vueCompiler,
-    webpackDevServer,
+    vue: vue.detected,
+    vite: vite.detected,
+    viteVuePlugin: viteVuePlugin.detected,
+    webpack: webpack.detected,
+    vueCliService: vueCliService.detected,
+    vueLoader: vueLoader.detected,
+    vueCompiler: compiler.primary,
+    vueCompilerDom: compiler.dom,
+    webpackDevServer: webpackDevServer.detected,
+    toolchain: {
+      ...(projectVueFamily(
+        vueClassification.status === 'supported' ? vueClassification.family : undefined,
+      ) ? {
+        vueFamily: projectVueFamily(
+          vueClassification.status === 'supported' ? vueClassification.family : undefined,
+        ),
+      } : {}),
+      ...(viteVersion ? { viteMajor: viteVersion.major } : {}),
+      ...(vueLoaderVersion ? { vueLoaderMajor: vueLoaderVersion.major } : {}),
+      ...(wdsVersion ? { webpackDevServerMajor: wdsVersion.major } : {}),
+      transport,
+    },
     bundler,
     adapter,
     devCommands,
-    configFiles,
+    configFiles: detectedConfigFiles,
     diagnostics,
     requiredInputs,
     blocked: requiredInputs.length > 0 || diagnostics.some((item) => item.blocking),

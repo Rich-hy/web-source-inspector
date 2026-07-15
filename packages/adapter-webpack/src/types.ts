@@ -13,6 +13,8 @@ import type {
   LoopbackBridge,
 } from '@web-source-inspector/dev-session-core';
 
+import type { WebpackSourceBoundary } from './source-boundary.js';
+
 export type VueLoaderMajor = 15 | 16 | 17;
 
 export interface WebpackLoaderEntry {
@@ -125,7 +127,12 @@ export interface WebpackBrowserMessageHandler {
 }
 
 export interface WebSourceInspectorWebpackPluginOptions {
+  /** 项目根目录，仅用于解析 Webpack、vue-loader 与 Vue compiler。 */
+  projectRoot?: string;
+  /** @deprecated 请改用 projectRoot。 */
   root?: string;
+  /** 可定位源码与 Manifest 的 workspace 根目录；省略时自动向上发现。 */
+  workspaceRoot?: string;
   rootKey?: string;
   vueVersion?: string;
   vueLoaderMajor?: VueLoaderMajor;
@@ -201,7 +208,9 @@ export interface WebpackAdapterSession {
   readonly sessionSourceKey: Buffer;
   readonly compilerVersion: string;
   readonly vueLoaderMajor: VueLoaderMajor;
-  readonly root: string;
+  readonly projectRoot: string;
+  readonly workspaceRoot: string;
+  readonly sourceBoundary: WebpackSourceBoundary;
   readonly rootKey: string;
   readonly manifest: SourceManifest;
   readonly createSourceId: SourceIdGenerator;

@@ -2,7 +2,7 @@
   "name": "web-source-inspector-vscode",
   "displayName": "Web Source Inspector",
   "description": "Open Vue template sources from Vite and Webpack development pages.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "web-source-inspector",
   "license": "MIT",
   "engines": {

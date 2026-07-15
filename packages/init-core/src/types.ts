@@ -1,7 +1,9 @@
-export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'unknown';
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun' | 'yarn-pnp' | 'unknown';
 export type BundlerKind = 'vite' | 'webpack' | 'vue-cli' | 'ambiguous' | 'unsupported';
 export type AdapterKind = 'vite-vue2' | 'vite-vue3' | 'webpack-vue2' | 'webpack-vue3';
 export type ConfigModuleKind = 'esm' | 'commonjs' | 'typescript';
+export type ProjectTransport = 'vite' | 'wds' | 'raw-watch' | 'ambiguous' | 'unknown';
+export type VueFamily = 'vue-2.6' | 'vue-2.7' | 'vue-3';
 
 export interface DetectedPackage {
   name: string;
@@ -44,7 +46,15 @@ export interface ProjectProfile {
   vueCliService?: DetectedPackage;
   vueLoader?: DetectedPackage;
   vueCompiler?: DetectedPackage;
+  vueCompilerDom?: DetectedPackage;
   webpackDevServer?: DetectedPackage;
+  toolchain?: {
+    vueFamily?: VueFamily;
+    viteMajor?: number;
+    vueLoaderMajor?: number;
+    webpackDevServerMajor?: number;
+    transport: ProjectTransport;
+  };
   bundler: BundlerKind;
   adapter?: AdapterKind;
   devCommands: DevCommandCandidate[];

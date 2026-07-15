@@ -379,18 +379,22 @@ function findPluginsArray(config: AstNode, body: AstNode[]): AstNode | undefined
   return undefined;
 }
 
-function importBindings(body: AstNode[], packageNames: ReadonlySet<string>): Set<string> {
-  const bindings = new Set<string>();
+function importBindings(
+  body: AstNode[],
+  packageNames: ReadonlySet<string>,
+): Map<string, string> {
+  const bindings = new Map<string, string>();
   for (const statement of body) {
     if (statement.type !== 'ImportDeclaration'
       || !isStringLiteral(statement.source)
       || !packageNames.has((statement.source as { value: string }).value)) {
       continue;
     }
+    const packageName = (statement.source as { value: string }).value;
     for (const specifier of (statement.specifiers as AstNode[] | undefined) ?? []) {
       const local = specifier.local;
       if (isIdentifier(local)) {
-        bindings.add(local.name);
+        bindings.set(local.name, packageName);
       }
     }
   }
@@ -419,7 +423,7 @@ function importBindings(body: AstNode[], packageNames: ReadonlySet<string>): Set
           ? defaultArgument.value
           : undefined;
       if (requiredPackage && packageNames.has(requiredPackage) && isIdentifier(declaration.id)) {
-        bindings.add(declaration.id.name);
+        bindings.set(declaration.id.name, requiredPackage);
       }
     }
   }
@@ -614,6 +618,8 @@ function operationMatchesNode(
 
 export interface ViteAstTransformOptions {
   browserAccess?: BrowserAccessMode;
+  /** detect 已确认的 Vue plugin 包；生产初始化必须传入。 */
+  expectedVuePluginPackage?: string;
 }
 
 export function transformViteConfig(
@@ -623,6 +629,10 @@ export function transformViteConfig(
 ): ViteAstTransformResult {
   if (options.browserAccess !== undefined && !isBrowserAccessMode(options.browserAccess)) {
     return { ok: false, code: source, operations: [], errorCode: 'INVALID_ANSWER' };
+  }
+  if (options.expectedVuePluginPackage !== undefined
+    && !VUE_PLUGIN_PACKAGES.has(options.expectedVuePluginPackage)) {
+    return { ok: false, code: source, operations: [], errorCode: 'VITE_VUE_PLUGIN_MISMATCH' };
   }
   const browserAccessMode = options.browserAccess;
   let ast: AstNode;
@@ -641,13 +651,42 @@ export function transformViteConfig(
     return { ok: false, code: source, operations: [], errorCode: 'CONFIG_SHAPE_UNSUPPORTED' };
   }
   const vueBindings = importBindings(body, VUE_PLUGIN_PACKAGES);
-  const vueIndex = elements.findIndex((element) => {
+  const vueCalls = elements.flatMap((element, index) => {
     const node = element as AstNode | null;
-    return node?.type === 'CallExpression'
-      && isIdentifier(node.callee)
-      && vueBindings.has(node.callee.name);
+    if (node?.type !== 'CallExpression'
+      || !isIdentifier(node.callee)) {
+      return [];
+    }
+    const packageName = vueBindings.get(node.callee.name);
+    return packageName
+      ? [{ index, packageName }]
+      : [];
   });
+  if (vueCalls.length === 0) {
+    return { ok: false, code: source, operations: [], errorCode: 'VITE_VUE_PLUGIN_NOT_FOUND' };
+  }
+  if (vueCalls.length !== 1) {
+    return { ok: false, code: source, operations: [], errorCode: 'VITE_VUE_PLUGIN_NOT_UNIQUE' };
+  }
+  const vueCall = vueCalls[0];
+  if (vueCall === undefined) {
+    return { ok: false, code: source, operations: [], errorCode: 'VITE_VUE_PLUGIN_NOT_FOUND' };
+  }
+  if (options.expectedVuePluginPackage !== undefined
+    && vueCall.packageName !== options.expectedVuePluginPackage) {
+    return { ok: false, code: source, operations: [], errorCode: 'VITE_VUE_PLUGIN_MISMATCH' };
+  }
+  const vueIndex = vueCall.index;
   if (vueIndex < 0) {
+    // 防御性分支：上方严格收集成功后不应发生。
+    return { ok: false, code: source, operations: [], errorCode: 'VITE_VUE_PLUGIN_NOT_FOUND' };
+  }
+  const vuePluginCall = elements[vueIndex] as AstNode | undefined;
+  if (!vuePluginCall
+    || vuePluginCall.type !== 'CallExpression'
+    || !isIdentifier(vuePluginCall.callee)
+    || vueBindings.get(vuePluginCall.callee.name) !== vueCall.packageName
+  ) {
     return { ok: false, code: source, operations: [], errorCode: 'VITE_VUE_PLUGIN_NOT_FOUND' };
   }
 

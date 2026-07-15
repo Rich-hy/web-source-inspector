@@ -115,7 +115,7 @@ async function startBridge(session: WebpackAdapterSession): Promise<void> {
   if (!router || !credential) {
     return;
   }
-  const canonicalRoot = realpathSync.native(session.root);
+  const canonicalRoot = realpathSync.native(session.workspaceRoot);
   const bridge = await createLoopbackBridge({
     session: {
       schemaVersion: SESSION_SCHEMA_VERSION,

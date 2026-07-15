@@ -1,10 +1,15 @@
 import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import {
   createSourceDigest,
   createRootKey as createCompilerRootKey,
   createSourceIdGenerator,
+  canResolveProjectPackageSpecifier,
+  classifyVueFamily,
+  evaluateToolchainCompatibility,
+  expectedViteVuePlugin,
+  findProjectPackageFact,
   SourceManifest,
   type CandidatePreference,
   type ResolvedSourceCandidate,
@@ -73,6 +78,7 @@ interface ActiveViteSession {
   compiler: VueCompilerAdapter;
   pendingModules: Map<string, PendingModuleState>;
   moduleBuildIds: Map<string, number>;
+  canonicalPathsByRequest: Map<string, string>;
   rootKey: string;
   browserAddressSnapshot: BrowserAddressSnapshot;
   browserAddressPolicy: BrowserAddressPolicy;
@@ -117,6 +123,150 @@ function createRuntimeHtmlTag(base: string): {
 function moduleCompilerId(sessionId: string, moduleId: string): string {
   const moduleDigest = createHash('sha256').update(moduleId).digest('base64url').slice(0, 22);
   return `vite_${sessionId}_${moduleDigest}`;
+}
+
+function moduleRequestPath(moduleId: string): string {
+  return path.resolve(moduleId);
+}
+
+function expectedAdapterFamily(family: 'vue2.6' | 'vue2.7' | 'vue3'): VueCompilerAdapter['family'] {
+  return family;
+}
+
+function validateInjectedCompiler(
+  compiler: VueCompilerAdapter,
+  family: 'vue2.6' | 'vue2.7' | 'vue3',
+  vueVersion: string | undefined,
+): void {
+  if (compiler.family !== expectedAdapterFamily(family)
+    || compiler.version !== vueVersion) {
+    throw new Error('VITE_COMPILER_ADAPTER_MISMATCH');
+  }
+}
+
+function inspectConfiguredVuePlugin(
+  config: ResolvedConfig,
+  expectedPackage: string,
+): string | undefined {
+  const expectedNames = expectedPackage === '@vitejs/plugin-vue'
+    ? new Set(['vite:vue'])
+    : new Set(['vite:vue2']);
+  const vuePluginIndices = config.plugins.flatMap((plugin, index) =>
+    expectedNames.has(plugin.name) ? [index] : []);
+  const inspectorIndex = config.plugins.findIndex((plugin) => plugin.name === 'web-source-inspector');
+  if (vuePluginIndices.length !== 1) {
+    return 'VITE_VUE_PLUGIN_RUNTIME_UNPROVEN';
+  }
+  const vueIndex = vuePluginIndices[0];
+  if (inspectorIndex >= 0 && vueIndex !== undefined && inspectorIndex > vueIndex) {
+    return 'VITE_PLUGIN_ORDER_UNPROVEN';
+  }
+  return undefined;
+}
+
+function declaresViteVueToolchain(projectRoot: string): boolean {
+  try {
+    if (!existsSync(path.join(projectRoot, 'package.json'))) {
+      return false;
+    }
+    const value: unknown = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return false;
+    }
+    const manifest = value as Record<string, unknown>;
+    const names = ['dependencies', 'devDependencies'].flatMap((field) => {
+      const dependencies = manifest[field];
+      return typeof dependencies === 'object' && dependencies !== null && !Array.isArray(dependencies)
+        ? Object.keys(dependencies)
+        : [];
+    });
+    return names.includes('vue') && names.includes('vite');
+  } catch {
+    return false;
+  }
+}
+
+function resolveRuntimeCompiler(
+  config: ResolvedConfig,
+  workspaceRoot: string,
+  injectedCompiler: VueCompilerAdapter | undefined,
+): VueCompilerAdapter {
+  const projectRoot = realpathSync(config.root);
+  if (!declaresViteVueToolchain(projectRoot)) {
+    return injectedCompiler ?? resolveVueCompilerAdapter({ projectRoot });
+  }
+  const projectPackageAnchor = {
+    packageJsonPath: path.relative(workspaceRoot, path.join(projectRoot, 'package.json')),
+  };
+  const vue = findProjectPackageFact(workspaceRoot, 'vue', { anchor: projectPackageAnchor });
+  const classification = classifyVueFamily(vue?.version);
+  const expectedPlugin = classification.status === 'supported'
+    ? expectedViteVuePlugin(classification.family)
+    : undefined;
+  const vite = findProjectPackageFact(workspaceRoot, 'vite', { anchor: projectPackageAnchor });
+  const viteVuePlugin = expectedPlugin
+    ? findProjectPackageFact(workspaceRoot, expectedPlugin.name, { anchor: projectPackageAnchor })
+    : undefined;
+  const vueTemplateCompiler = findProjectPackageFact(
+    workspaceRoot,
+    'vue-template-compiler',
+    { anchor: projectPackageAnchor },
+  );
+  const vueCompilerSfc = findProjectPackageFact(
+    workspaceRoot,
+    '@vue/compiler-sfc',
+    { anchor: projectPackageAnchor },
+  );
+  const vueCompilerDom = findProjectPackageFact(
+    workspaceRoot,
+    '@vue/compiler-dom',
+    { anchor: projectPackageAnchor },
+  );
+  const vueCompilerSfcFromVueAnchor = classification.status === 'supported'
+    && classification.family === 'vue2.7'
+    && canResolveProjectPackageSpecifier(workspaceRoot, 'vue/compiler-sfc', {
+      anchor: projectPackageAnchor,
+    });
+  const issues = evaluateToolchainCompatibility({
+    node: {
+      nodeVersion: process.versions.node,
+      toolchainEngineRange: vite?.engines.node,
+      toolchainName: vite?.name,
+    },
+    packageManager: 'unknown',
+    vue,
+    bundler: 'vite',
+    vite,
+    viteVuePlugin,
+    vueTemplateCompiler,
+    vueCompilerSfc,
+    vueCompilerDom,
+    vueCompilerSfcFromVueAnchor,
+  });
+  const blocking = issues.filter((issue) => issue.severity === 'error');
+  for (const issue of issues) {
+    const message = '[wsi] ' + issue.code + ': ' + issue.remediation;
+    if (issue.severity === 'error') {
+      config.logger.error(message);
+    } else {
+      config.logger.warn(message);
+    }
+  }
+  if (blocking.length > 0) {
+    throw new Error('VITE_TOOLCHAIN_UNSUPPORTED');
+  }
+  if (!expectedPlugin || classification.status !== 'supported') {
+    throw new Error('VITE_TOOLCHAIN_UNSUPPORTED');
+  }
+  const pluginDiagnostic = inspectConfiguredVuePlugin(config, expectedPlugin.name);
+  if (pluginDiagnostic) {
+    config.logger.warn('[wsi] ' + pluginDiagnostic);
+  }
+  if (injectedCompiler) {
+    validateInjectedCompiler(injectedCompiler, classification.family, vue?.version);
+    return injectedCompiler;
+  }
+  return resolveVueCompilerAdapter({ projectRoot });
 }
 
 /**
@@ -256,6 +406,8 @@ export function webSourceInspector(
         return null;
       }
 
+      // unlink 发生时文件可能已不存在，需保留逻辑请求路径对应的真实路径。
+      session.canonicalPathsByRequest.set(moduleRequestPath(moduleId), filename);
       const digest = createSourceDigest(source);
       const generation = session.manifest.allocateGeneration(filename, digest);
       const previousPending = session.pendingModules.get(filename);
@@ -321,9 +473,7 @@ export function webSourceInspector(
       }
       workspaceRoot = findWorkspaceRoot(config.root, options.workspaceRoot);
       sourceRoots = resolveSourceRoots(workspaceRoot, options.sourceRoots);
-      const compiler = options.compiler ?? resolveVueCompilerAdapter({
-        projectRoot: realpathSync(config.root),
-      });
+      const compiler = resolveRuntimeCompiler(config, workspaceRoot, options.compiler);
       const sessionSourceKey = createSessionHmacKey();
       const sessionId = createSessionId();
       const manifest = new SourceManifest({
@@ -357,6 +507,7 @@ export function webSourceInspector(
         compiler,
         pendingModules: new Map(),
         moduleBuildIds: new Map(),
+        canonicalPathsByRequest: new Map(),
         rootKey,
         browserAddressSnapshot,
         browserAddressPolicy,
@@ -394,7 +545,9 @@ export function webSourceInspector(
       server.ws.on(browserEvents.dispose, handleDispose);
 
       const handleUnlink = (filename: string): void => {
-        const canonical = path.resolve(filename);
+        const requestPath = moduleRequestPath(filename);
+        const canonical = session.canonicalPathsByRequest.get(requestPath) ?? requestPath;
+        session.canonicalPathsByRequest.delete(requestPath);
         const pending = session.pendingModules.get(canonical);
         pending?.stage.discard();
         session.pendingModules.delete(canonical);
@@ -487,6 +640,7 @@ export function webSourceInspector(
         session.manifest.clear();
         session.pendingModules.clear();
         session.moduleBuildIds.clear();
+        session.canonicalPathsByRequest.clear();
         session.allowedOrigins = Object.freeze([]);
         session.browserAccessInitialized = false;
         session.sessionSourceKey.fill(0);

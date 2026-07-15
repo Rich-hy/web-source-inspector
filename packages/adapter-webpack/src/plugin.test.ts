@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 
 import { WSI_BUILD_METADATA_KEY } from './constants.js';
 import { WebSourceInspectorWebpackPlugin } from './plugin.js';
@@ -191,6 +191,138 @@ describe('WebSourceInspectorWebpackPlugin', () => {
     }
   });
 
+  it('在声明为真实项目的工具链不兼容时创建 session 前阻断', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-preflight-'));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({
+      name: 'fixture',
+      dependencies: {
+        vue: '3.5.0',
+        webpack: '6.0.0',
+        'vue-loader': '17.4.2',
+      },
+    }), 'utf8');
+    for (const [name, version] of [
+      ['vue', '3.5.0'],
+      ['webpack', '6.0.0'],
+      ['vue-loader', '17.4.2'],
+    ] as const) {
+      const directory = path.join(root, 'node_modules', name);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(path.join(directory, 'package.json'), JSON.stringify({
+        name,
+        version,
+      }), 'utf8');
+    }
+    const { compiler } = createDevelopmentCompiler();
+    if (!compiler.options) {
+      throw new Error('测试 compiler options 不存在');
+    }
+    compiler.options.context = root;
+
+    expect(() => new WebSourceInspectorWebpackPlugin({
+      browserTransport: 'none',
+    }).apply(compiler)).toThrow(/兼容合同/u);
+  });
+
+  it('从 workspace hoisted node_modules 读取项目锚定的 Webpack/Vue facts', () => {
+    const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-hoisted-'));
+    onTestFinished(() => rmSync(workspaceRoot, { recursive: true, force: true }));
+    const projectRoot = path.join(workspaceRoot, 'apps', 'demo');
+    writeJson(path.join(workspaceRoot, 'package.json'), {
+      private: true,
+      workspaces: ['apps/*'],
+    });
+    writeJson(path.join(projectRoot, 'package.json'), {
+      name: 'demo',
+      devDependencies: {
+        vue: '3.5.0',
+        webpack: '5.99.0',
+        'vue-loader': '17.4.2',
+      },
+    });
+    writeNodePackage(workspaceRoot, 'vue', { name: 'vue', version: '3.5.0' });
+    writeNodePackage(workspaceRoot, 'webpack', { name: 'webpack', version: '5.99.0' });
+    writeNodePackage(workspaceRoot, 'vue-loader', {
+      name: 'vue-loader',
+      version: '17.4.2',
+      peerDependencies: { webpack: '>=4.0.0 <6.0.0' },
+    });
+    writeNodePackage(workspaceRoot, '@vue/compiler-sfc', {
+      name: '@vue/compiler-sfc',
+      version: '3.5.0',
+    }, 'exports.parse = () => ({ descriptor: {}, errors: [] });');
+    writeNodePackage(workspaceRoot, '@vue/compiler-dom', {
+      name: '@vue/compiler-dom',
+      version: '3.5.0',
+    }, 'exports.parse = () => ({ children: [] });');
+
+    const { compiler, hooks } = createDevelopmentCompiler();
+    if (!compiler.options) {
+      throw new Error('测试 compiler options 不存在');
+    }
+    compiler.options.context = projectRoot;
+    const diagnostics: string[] = [];
+    const plugin = new WebSourceInspectorWebpackPlugin({
+      projectRoot,
+      browserTransport: 'none',
+      diagnostics: (message) => diagnostics.push(message),
+    });
+
+    try {
+      expect(() => plugin.apply(compiler)).not.toThrow();
+      expect(getWebpackAdapterSession(compiler)).not.toBeNull();
+      expect(diagnostics).toContain('PACKAGE_MANAGER_UNDETERMINED');
+    } finally {
+      hooks.watchClose.call();
+    }
+  });
+
+  it('真实声明 Vue/Webpack 但缺少 vue-loader 时以 TOOLCHAIN_UNSUPPORTED 阻断', () => {
+    const projectRoot = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-missing-loader-'));
+    onTestFinished(() => rmSync(projectRoot, { recursive: true, force: true }));
+    writeJson(path.join(projectRoot, 'package.json'), {
+      name: 'missing-loader',
+      devDependencies: {
+        vue: '3.5.0',
+        webpack: '5.99.0',
+      },
+    });
+    writeNodePackage(projectRoot, 'vue', { name: 'vue', version: '3.5.0' });
+    writeNodePackage(projectRoot, 'webpack', { name: 'webpack', version: '5.99.0' });
+    writeNodePackage(projectRoot, '@vue/compiler-sfc', {
+      name: '@vue/compiler-sfc',
+      version: '3.5.0',
+    }, 'exports.parse = () => ({ descriptor: {}, errors: [] });');
+    writeNodePackage(projectRoot, '@vue/compiler-dom', {
+      name: '@vue/compiler-dom',
+      version: '3.5.0',
+    }, 'exports.parse = () => ({ children: [] });');
+
+    const { compiler, hooks } = createDevelopmentCompiler();
+    if (!compiler.options) {
+      throw new Error('测试 compiler options 不存在');
+    }
+    compiler.options.context = projectRoot;
+    const diagnostics: string[] = [];
+    let error: unknown;
+    try {
+      new WebSourceInspectorWebpackPlugin({
+        projectRoot,
+        vueLoaderMajor: 17,
+        browserTransport: 'none',
+        diagnostics: (message) => diagnostics.push(message),
+      }).apply(compiler);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      hooks.watchClose.call();
+    }
+
+    expect(error).toMatchObject({ code: 'TOOLCHAIN_UNSUPPORTED' });
+    expect(diagnostics).toContain('VUE_LOADER_MISSING');
+  });
+
   it('旁路 vue-loader pitcher 代理模块', () => {
     const { compiler, hooks } = createDevelopmentCompiler();
     new WebSourceInspectorWebpackPlugin({
@@ -225,14 +357,23 @@ describe('WebSourceInspectorWebpackPlugin', () => {
 
   it('Pug/external src 缺少 metadata 时旁路，普通 HTML 仍 fail-closed', () => {
     const { compiler, hooks } = createDevelopmentCompiler();
+    const root = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-plugin-boundary-'));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const appPath = path.join(root, 'src', 'App.vue');
+    mkdirSync(path.dirname(appPath), { recursive: true });
+    writeFileSync(appPath, '<template><div /></template>', 'utf8');
+    if (!compiler.options) {
+      throw new Error('测试 compiler options 不存在');
+    }
+    compiler.options.context = root;
     new WebSourceInspectorWebpackPlugin({
       vueLoaderMajor: 17,
       browserTransport: 'none',
     }).apply(compiler);
 
     for (const resource of [
-      'C:/workspace/src/App.vue?vue&type=template&id=abc&lang=pug',
-      'C:/workspace/src/App.vue?vue&type=template&id=abc&src=true',
+      `${appPath}?vue&type=template&id=abc&lang=pug`,
+      `${appPath}?vue&type=template&id=abc&src=true`,
     ]) {
       const unsupportedCompilation = createCompilation();
       hooks.thisCompilation.call(unsupportedCompilation.compilation);
@@ -250,7 +391,7 @@ describe('WebSourceInspectorWebpackPlugin', () => {
     const htmlCompilation = createCompilation();
     hooks.thisCompilation.call(htmlCompilation.compilation);
     const htmlTemplateModule: WebpackModuleLike = {
-      resource: 'C:/workspace/src/App.vue?vue&type=template&id=abc',
+      resource: `${appPath}?vue&type=template&id=abc`,
       buildInfo: {},
     };
     htmlCompilation.compilation.modules = [htmlTemplateModule];
@@ -259,8 +400,47 @@ describe('WebSourceInspectorWebpackPlugin', () => {
     hooks.watchClose.call();
   });
 
+  it('metadata collector 对第三方 template 使用 source boundary 旁路并清理旧 metadata', () => {
+    const { compiler, hooks } = createDevelopmentCompiler();
+    const root = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-plugin-dependency-'));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const dependencyPath = path.join(root, 'node_modules', 'dependency', 'Dependency.vue');
+    mkdirSync(path.dirname(dependencyPath), { recursive: true });
+    writeFileSync(dependencyPath, '<template><div /></template>', 'utf8');
+    if (!compiler.options) {
+      throw new Error('测试 compiler options 不存在');
+    }
+    compiler.options.context = root;
+    new WebSourceInspectorWebpackPlugin({
+      vueLoaderMajor: 17,
+      browserTransport: 'none',
+    }).apply(compiler);
+
+    const dependencyCompilation = createCompilation();
+    hooks.thisCompilation.call(dependencyCompilation.compilation);
+    const dependencyTemplateModule: WebpackModuleLike = {
+      resource: `${dependencyPath}?vue&type=template&id=abc`,
+      buildInfo: { [WSI_BUILD_METADATA_KEY]: { stale: true } },
+    };
+    dependencyCompilation.compilation.modules = [dependencyTemplateModule];
+    dependencyCompilation.finishModules.call([dependencyTemplateModule]);
+
+    expect(dependencyCompilation.compilation.errors).toEqual([]);
+    expect(dependencyTemplateModule.buildInfo?.[WSI_BUILD_METADATA_KEY]).toBeUndefined();
+    hooks.watchClose.call();
+  });
+
   it('只提交无错误的当前 compilation，失败 rebuild 保留上一代 manifest', () => {
     const { compiler, hooks, ruleUse } = createDevelopmentCompiler();
+    const root = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-plugin-manifest-'));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const resourcePath = path.join(root, 'src', 'App.vue');
+    mkdirSync(path.dirname(resourcePath), { recursive: true });
+    writeFileSync(resourcePath, '<template><div /></template>', 'utf8');
+    if (!compiler.options) {
+      throw new Error('测试 compiler options 不存在');
+    }
+    compiler.options.context = root;
     const plugin = new WebSourceInspectorWebpackPlugin({
       vueLoaderMajor: 17,
       browserTransport: 'none',
@@ -278,7 +458,10 @@ describe('WebSourceInspectorWebpackPlugin', () => {
     const first = createCompilation();
     hooks.thisCompilation.call(first.compilation);
     const firstMetadata = createMetadata(session, 'src/App.vue', '<template><div /></template>');
-    const firstModule = moduleWithMetadata(firstMetadata);
+    const firstModule = moduleWithMetadata(
+      firstMetadata,
+      `${resourcePath}?vue&type=template&id=abc`,
+    );
     first.compilation.modules = [firstModule];
     first.finishModules.call([firstModule]);
     hooks.done.call({ compilation: first.compilation, hasErrors: () => false });
@@ -289,7 +472,10 @@ describe('WebSourceInspectorWebpackPlugin', () => {
     const failed = createCompilation();
     hooks.thisCompilation.call(failed.compilation);
     const failedMetadata = createMetadata(session, 'src/App.vue', '<template><button /></template>');
-    const failedModule = moduleWithMetadata(failedMetadata);
+    const failedModule = moduleWithMetadata(
+      failedMetadata,
+      `${resourcePath}?vue&type=template&id=abc`,
+    );
     failed.compilation.modules = [failedModule];
     failed.finishModules.call([failedModule]);
     failed.compilation.errors.push(new Error('downstream vue compile failed'));
@@ -302,7 +488,7 @@ describe('WebSourceInspectorWebpackPlugin', () => {
     const missingMetadata = createCompilation();
     hooks.thisCompilation.call(missingMetadata.compilation);
     const cachedTemplateModule: WebpackModuleLike = {
-      resource: 'C:/workspace/src/App.vue?vue&type=template&id=abc',
+      resource: `${resourcePath}?vue&type=template&id=abc`,
       buildInfo: {},
     };
     missingMetadata.compilation.modules = [cachedTemplateModule];
@@ -427,6 +613,24 @@ function createMetadata(
   };
 }
 
-function moduleWithMetadata(metadata: WsiBuildMetadata): WebpackModuleLike {
-  return { buildInfo: { [WSI_BUILD_METADATA_KEY]: metadata } };
+function moduleWithMetadata(metadata: WsiBuildMetadata, resource?: string): WebpackModuleLike {
+  return { resource, buildInfo: { [WSI_BUILD_METADATA_KEY]: metadata } };
+}
+
+function writeJson(filename: string, value: unknown): void {
+  mkdirSync(path.dirname(filename), { recursive: true });
+  writeFileSync(filename, JSON.stringify(value), 'utf8');
+}
+
+function writeNodePackage(
+  workspaceRoot: string,
+  name: string,
+  manifest: Record<string, unknown>,
+  source?: string,
+): void {
+  const directory = path.join(workspaceRoot, 'node_modules', ...name.split('/'));
+  writeJson(path.join(directory, 'package.json'), manifest);
+  if (source) {
+    writeFileSync(path.join(directory, 'index.js'), source, 'utf8');
+  }
 }

@@ -54,7 +54,14 @@ function createVueCliFixture(
   // 模拟 pnpm 未提升的 Vue CLI 传递依赖。
   const cliServiceDependencies = 'node_modules/@vue/cli-service/node_modules';
   writePackage(workspaceRoot, `${cliServiceDependencies}/webpack`, 'webpack', '5.94.0');
-  writePackage(workspaceRoot, `${cliServiceDependencies}/vue-loader`, 'vue-loader', '15.11.1');
+  writeJson(path.join(workspaceRoot, `${cliServiceDependencies}/vue-loader/package.json`), {
+    name: 'vue-loader',
+    version: '15.11.1',
+    // vue-loader 15 官方只声明 webpack peer，Vue 2 匹配由 loader 主版本保证。
+    peerDependencies: {
+      webpack: '^3.0.0 || ^4.1.0 || ^5.0.0-0',
+    },
+  });
   writePackage(
     workspaceRoot,
     `${cliServiceDependencies}/webpack-dev-server`,

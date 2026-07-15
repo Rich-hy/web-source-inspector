@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+import { classifyVueFamily, parseStrictSemVer } from '@web-source-inspector/compiler-core';
+
 import type { VueCompilerAdapter } from './common/compiler.js';
 import {
   createVue26CompilerAdapter,
@@ -17,8 +19,13 @@ export type VueCompilerResolutionErrorCode =
 export interface ResolveVueCompilerAdapterOptions {
   /** 消费项目根目录或其中任意文件所在目录。 */
   projectRoot: string;
-  /** bundler 已确认的 Vue 版本；省略时读取 vue/package.json。 */
+  /** bundler 已确认的 Vue 版本；只能与实际 Vue 完整版本一致。 */
   vueVersion?: string;
+}
+
+interface ResolutionLoaders {
+  project: NodeJS.Require;
+  vue: NodeJS.Require;
 }
 
 export class VueCompilerResolutionError extends Error {
@@ -32,71 +39,105 @@ export class VueCompilerResolutionError extends Error {
 }
 
 /**
- * 只从消费项目解析 compiler，避免公开包自身依赖污染实际 toolchain。
+ * 只从消费项目解析 compiler，实际 vue/package.json 是唯一版本真源。
  */
 export function resolveVueCompilerAdapter(
   options: ResolveVueCompilerAdapterOptions,
 ): VueCompilerAdapter {
   const loaders = createResolutionLoaders(options.projectRoot);
-  const vuePackage = loadOptionalModule(loaders, 'vue/package.json');
-  const vueVersion = options.vueVersion ?? readPackageVersion(vuePackage);
+  const vuePackage = loadOptionalModule([loaders.project], 'vue/package.json');
+  const vueVersion = readPackageVersion(vuePackage);
   if (vueVersion === null) {
     throw new VueCompilerResolutionError(
       'VUE_NOT_FOUND',
-      '无法从消费项目解析 Vue 版本；请显式注入 compiler 或传入 vueVersion',
+      '无法从消费项目解析 vue/package.json。',
+    );
+  }
+  if (options.vueVersion !== undefined && options.vueVersion !== vueVersion) {
+    throw new VueCompilerResolutionError(
+      'COMPILER_VERSION_MISMATCH',
+      '传入的 Vue 版本必须与消费项目实际 vue/package.json 完全一致。',
     );
   }
 
-  const version = parseVueVersion(vueVersion);
-  if (version.major === 2 && version.minor === 6) {
-    const compiler = loadRequiredModule(loaders, 'vue-template-compiler');
-    assertCompilerVersion(vueVersion, readModuleVersion(compiler), 'vue-template-compiler');
+  const family = classifyVueFamily(vueVersion);
+  if (family.status !== 'supported') {
+    throw new VueCompilerResolutionError(
+      'UNSUPPORTED_VUE_VERSION',
+      '当前仅支持 Vue 2.6、2.7 和 Vue 3.2 至 3.x。',
+    );
+  }
+
+  if (family.family === 'vue2.6') {
+    const compilerPackage = loadRequiredModule(
+      [loaders.project, loaders.vue],
+      'vue-template-compiler/package.json',
+    );
+    const compiler = loadRequiredModule(
+      [loaders.project, loaders.vue],
+      'vue-template-compiler',
+    );
+    assertCompilerPackageVersion(
+      vueVersion,
+      readPackageVersion(compilerPackage),
+      'vue-template-compiler',
+    );
     return createVue26CompilerAdapter({ compiler, version: vueVersion });
   }
 
-  if (version.major === 2 && version.minor === 7) {
-    const compilerSfc = loadRequiredModule(loaders, 'vue/compiler-sfc');
-    const compilerVersion = readModuleVersion(compilerSfc);
-    if (compilerVersion !== null) {
-      assertCompilerVersion(vueVersion, compilerVersion, 'vue/compiler-sfc');
-    }
+  if (family.family === 'vue2.7') {
+    // Vue 2.7 的 compiler 与 Vue 包同锚点解析，模块自身 version 字段不是证据。
+    const compilerSfc = loadRequiredModule([loaders.vue], 'vue/compiler-sfc');
     return createVue27CompilerAdapter({ compilerSfc, version: vueVersion });
   }
 
-  if (version.major === 3 && version.minor >= 2) {
-    const compilerSfc = loadOptionalModule(loaders, 'vue/compiler-sfc')
-      ?? loadRequiredModule(loaders, '@vue/compiler-sfc');
-    const compilerDom = loadRequiredModule(loaders, '@vue/compiler-dom');
-    assertCompilerVersion(vueVersion, readModuleVersion(compilerSfc), '@vue/compiler-sfc');
-    const compilerDomPackage = loadOptionalModule(loaders, '@vue/compiler-dom/package.json');
-    const compilerDomVersion = readPackageVersion(compilerDomPackage);
-    if (compilerDomVersion !== null) {
-      assertCompilerVersion(vueVersion, compilerDomVersion, '@vue/compiler-dom');
-    }
-    return createVue3CompilerAdapter({
-      compilerSfc,
-      compilerDom,
-      version: vueVersion,
-    });
-  }
-
-  throw new VueCompilerResolutionError(
-    'UNSUPPORTED_VUE_VERSION',
-    `当前仅支持 Vue 2.6、2.7 和 Vue 3.2+，检测到 ${vueVersion}`,
+  const compilerSfcPackage = loadRequiredModule(
+    [loaders.vue, loaders.project],
+    '@vue/compiler-sfc/package.json',
   );
+  const compilerDomPackage = loadRequiredModule(
+    [loaders.vue, loaders.project],
+    '@vue/compiler-dom/package.json',
+  );
+  const compilerSfc = loadRequiredModule(
+    [loaders.vue, loaders.project],
+    '@vue/compiler-sfc',
+  );
+  const compilerDom = loadRequiredModule(
+    [loaders.vue, loaders.project],
+    '@vue/compiler-dom',
+  );
+  assertCompilerPackageVersion(
+    vueVersion,
+    readPackageVersion(compilerSfcPackage),
+    '@vue/compiler-sfc',
+  );
+  assertCompilerPackageVersion(
+    vueVersion,
+    readPackageVersion(compilerDomPackage),
+    '@vue/compiler-dom',
+  );
+  return createVue3CompilerAdapter({
+    compilerSfc,
+    compilerDom,
+    version: vueVersion,
+  });
 }
 
-function createResolutionLoaders(projectRoot: string): NodeJS.Require[] {
+function createResolutionLoaders(projectRoot: string): ResolutionLoaders {
   const normalizedRoot = path.resolve(projectRoot);
-  const projectLoader = createRequire(path.join(normalizedRoot, 'package.json'));
-  const loaders = [projectLoader];
+  const project = createRequire(path.join(normalizedRoot, 'package.json'));
+  let vue: NodeJS.Require;
   try {
-    // pnpm 下 compiler 可能只存在于 Vue 自身依赖树，必须以真实 Vue 包为解析锚点。
-    loaders.push(createRequire(projectLoader.resolve('vue/package.json')));
+    // pnpm 下 compiler 可能只在 Vue 的依赖树中，必须以实际 Vue 包作为解析锚点。
+    vue = createRequire(project.resolve('vue/package.json'));
   } catch {
-    // 后续统一返回 VUE_NOT_FOUND，避免在 loader 构造阶段泄漏底层解析错误。
+    throw new VueCompilerResolutionError(
+      'VUE_NOT_FOUND',
+      '无法从消费项目解析 Vue 包。',
+    );
   }
-  return loaders;
+  return { project, vue };
 }
 
 function loadRequiredModule(loaders: readonly NodeJS.Require[], specifier: string): unknown {
@@ -104,7 +145,7 @@ function loadRequiredModule(loaders: readonly NodeJS.Require[], specifier: strin
   if (loaded === null) {
     throw new VueCompilerResolutionError(
       'COMPILER_NOT_FOUND',
-      `无法从消费项目解析 ${specifier}；请确认 bundler 使用的 compiler 已安装并显式注入`,
+      '无法从消费项目解析 ' + specifier + '；请确认实际 compiler 已安装。',
     );
   }
   return loaded;
@@ -115,7 +156,7 @@ function loadOptionalModule(loaders: readonly NodeJS.Require[], specifier: strin
     try {
       return loader(specifier) as unknown;
     } catch (error) {
-      if (isModuleNotFoundFor(error, specifier)) {
+      if (isTargetModuleNotFound(error, specifier)) {
         continue;
       }
       throw error;
@@ -124,15 +165,18 @@ function loadOptionalModule(loaders: readonly NodeJS.Require[], specifier: strin
   return null;
 }
 
-function isModuleNotFoundFor(error: unknown, specifier: string): boolean {
+/**
+ * 只有请求的目标模块本身缺失时才允许 fallback；compiler 内部缺包必须原样抛出。
+ */
+function isTargetModuleNotFound(error: unknown, specifier: string): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
   const candidate = error as Error & { code?: string };
-  return (
-    (candidate.code === 'MODULE_NOT_FOUND' || candidate.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') &&
-    (candidate.message.includes(specifier) || candidate.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED')
-  );
+  if (candidate.code !== 'MODULE_NOT_FOUND' && candidate.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+    return false;
+  }
+  return error.message.includes(specifier);
 }
 
 function readPackageVersion(value: unknown): string | null {
@@ -140,21 +184,12 @@ function readPackageVersion(value: unknown): string | null {
     return null;
   }
   const version = (value as { version?: unknown }).version;
-  return typeof version === 'string' ? version : null;
+  return typeof version === 'string' && parseStrictSemVer(version)
+    ? version
+    : null;
 }
 
-function readModuleVersion(value: unknown): string | null {
-  const directVersion = readPackageVersion(value);
-  if (directVersion !== null) {
-    return directVersion;
-  }
-  if (typeof value !== 'object' || value === null || !('default' in value)) {
-    return null;
-  }
-  return readPackageVersion((value as { default?: unknown }).default);
-}
-
-function assertCompilerVersion(
+function assertCompilerPackageVersion(
   vueVersion: string,
   compilerVersion: string | null,
   compilerName: string,
@@ -162,21 +197,7 @@ function assertCompilerVersion(
   if (compilerVersion === null || compilerVersion !== vueVersion) {
     throw new VueCompilerResolutionError(
       'COMPILER_VERSION_MISMATCH',
-      `${compilerName} 必须与 Vue 完全同版本：Vue ${vueVersion}，compiler ${compilerVersion ?? 'unknown'}`,
+      compilerName + ' 必须与 Vue 完全同版本。',
     );
   }
-}
-
-function parseVueVersion(version: string): { major: number; minor: number } {
-  const match = /^(\d+)\.(\d+)(?:\.|$)/.exec(version);
-  if (match === null) {
-    throw new VueCompilerResolutionError(
-      'UNSUPPORTED_VUE_VERSION',
-      `无法识别 Vue 版本 ${version}`,
-    );
-  }
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-  };
 }

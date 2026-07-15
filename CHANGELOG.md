@@ -2,6 +2,20 @@
 
 本文记录 Web Source Inspector 的用户可见变化。项目遵循 SemVer；npm 与各扩展市场的发布状态需要分别查询确认。
 
+## 0.1.0-beta.3 - 2026-07-15
+
+发布单元：npm `web-source-inspector@0.1.0-beta.3`；手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。
+
+### Changed
+
+- Vite、Webpack 和 Vue CLI 接入统一执行严格的运行期 toolchain 判定；不完整或不兼容的 Vue、compiler、Vue plugin、`vue-loader`、Webpack 或 Dev Server 组合会给出明确诊断，而不是继续以不可靠方式运行。
+- monorepo 中依赖提升到 workspace 根目录的 Vue/Vite/Webpack 项目，会以应用项目自身的 `package.json` 作为解析锚点，正确读取实际依赖事实。
+- 初始化器和 Doctor 同步展示兼容性结论，Webpack 对缺少真实 `vue-loader` 事实的项目采取拒绝接入的保守策略。
+
+### Security
+
+- Webpack 源码候选和项目边界继续基于 realpath 校验，符号链接或 Junction 指向 workspace 外部时不会作为可打开源码返回。
+
 ## 0.1.0-beta.2 - 2026-07-14
 
 ### Changed

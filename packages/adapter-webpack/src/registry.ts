@@ -18,6 +18,10 @@ import {
   disposeWebpackBrowserSession,
 } from './browser-session.js';
 import { WebpackAdapterError } from './errors.js';
+import {
+  createWebpackSourceBoundary,
+  resolveWebpackWorkspaceRoot,
+} from './source-boundary.js';
 import type {
   BrowserTransportCredential,
   VueLoaderMajor,
@@ -52,11 +56,18 @@ export function createWebpackAdapterSession(
     );
   }
 
-  const root = path.resolve(options.root ?? compiler.options?.context ?? compiler.context ?? process.cwd());
+  const projectRoot = path.resolve(
+    options.projectRoot ?? options.root ?? compiler.options?.context ?? compiler.context ?? process.cwd(),
+  );
+  const workspaceRoot = resolveWebpackWorkspaceRoot(projectRoot, options.workspaceRoot);
+  const sourceBoundary = createWebpackSourceBoundary(projectRoot, workspaceRoot);
   const sourceKey = randomBytes(32);
   const compilerSessionId = `webpack_${randomBytes(16).toString('base64url')}`;
   const sessionEpoch = randomBytes(16).toString('base64url');
-  const rootKey = options.rootKey ?? createRootKey(root, sourceKey);
+  const rootKey = options.rootKey ?? createRootKey(
+    sourceBoundary.canonicalWorkspaceRoot ?? workspaceRoot,
+    sourceKey,
+  );
   if (!SAFE_ROOT_KEY_PATTERN.test(rootKey)) {
     throw new TypeError('rootKey 格式无效');
   }
@@ -91,7 +102,9 @@ export function createWebpackAdapterSession(
     sessionSourceKey: sourceKey,
     compilerVersion,
     vueLoaderMajor,
-    root,
+    projectRoot,
+    workspaceRoot,
+    sourceBoundary,
     rootKey,
     manifest,
     createSourceId: createSourceIdGenerator(sourceKey),
@@ -206,6 +219,18 @@ function createBrowserCredentials(
     throw new WebpackAdapterError(
       'INVALID_BROWSER_TRANSPORT_CONFIG',
       'raw Webpack watch 必须配置精确 allowedOrigins',
+    );
+  }
+  if (transport === 'raw' && origins?.some((origin) => {
+    try {
+      return new URL(origin).protocol === 'https:';
+    } catch {
+      return false;
+    }
+  })) {
+    throw new WebpackAdapterError(
+      'RAW_WATCH_HTTPS_UNSUPPORTED',
+      'raw Webpack watch 不支持 HTTPS allowedOrigins',
     );
   }
   const allowedOrigins = origins === undefined ? null : normalizeAllowedOrigins(origins);

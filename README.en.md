@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | **English**
 
-> **Development status:** version 0.1.0-beta.2 is the release candidate. Check npm and each extension marketplace independently for publication status. Packaged VSIX behavior in VS Code and Cursor still requires release smoke-test evidence for each editor.
+> **Current baseline:** npm `web-source-inspector@0.1.0-beta.3`; manually installed VSIX `web-source-inspector-vscode@0.1.1`. They are separate distribution artifacts; installable versions, runtime tuple compatibility, and real-editor validation are separate conclusions. See the [capability matrix](docs/capabilities.md) for the evidence.
 
 Web Source Inspector maps an element in a Vue development page back to its original .vue template range in VS Code or Cursor. It works through project-side Vite or Webpack/Vue CLI integration, rather than attempting to guess source locations from the final DOM.
 
@@ -12,14 +12,14 @@ The system combines a Vue SFC transform, a browser inspector, an in-memory devel
 
 - Maps ordinary DOM nodes, component call sites, loops, conditional branches, Slots, Fragments, dynamic components, and Teleport output to trusted Vue template candidates.
 - Provides a development-only floating inspector, hover highlighting, Shadow DOM isolation, keyboard shortcuts, and selection-mode event interception.
-- Supports a one-time, ownership-aware project setup through the project-local CLI or the VS Code/Cursor extension.
+- Supports a one-time, ownership-aware project setup through the project-local CLI or the VS Code/Cursor extension. The extension invokes the workspace CLI, previews the plan and diff, and writes configuration only after user confirmation.
 - Preserves existing development commands and only changes recognized static Vite, Webpack, or Vue CLI configuration shapes.
 - Keeps HMR generations and stale source-ID tombstones in memory so an outdated ID is not guessed onto a new file or range.
 - Uses a loopback-only, authenticated IDE Bridge and revalidates workspace containment before an editor opens a file.
 
 ## Scope and compatibility
 
-The current implementation targets Vue 2.6, Vue 2.7, and Vue 3.2+ projects using standard supported configurations of Vite 2–6, Webpack 4/5, or Vue CLI 3/4/5. The exact Vue compiler, bundler plugin, loader, and development-server versions must also be compatible with one another under their upstream peer-dependency rules.
+The installable peer ranges are Vue 2.6 (>=2.6.0 <2.7.0), Vue 2.7 (>=2.7.0 <2.8.0), and Vue 3 (>=3.2.0 <4.0.0), with Vite >=2.9.0 <7.0.0, Webpack >=4 <6, or Vue CLI 3-5 in supported standard configuration shapes. At runtime, the actual Vue compiler, bundler plugin or loader, Webpack Dev Server, and raw transport must also form a compatible upstream-peer tuple. Official vue-loader 15/16/17 releases do not declare a Vue peer; Vue family is determined by the actual full version in `vue/package.json`. On Webpack/Vue CLI paths, vue-loader's major version must match that Vue family and its Webpack peer must match; Vite does not depend on vue-loader. Compiler evidence is family-specific: for Vue 2.6, `vue-template-compiler` must exactly match the actual full Vue version; for Vue 2.7, `vue/compiler-sfc` must resolve from the actual `vue` package anchor; for Vue 3, both `@vue/compiler-sfc` and `@vue/compiler-dom` must exist and each must exactly match the actual full Vue version. The package-manager contract supports npm, pnpm, and Yarn in node_modules mode; detect/doctor rejects Bun and Yarn PnP. This contract is separate from real npm/Yarn fixture or E2E evidence, which remains listed independently in the [capability matrix](docs/capabilities.md). An installable range is not evidence that every tuple is compatible or verified.
 
 These version ranges are implementation scope, not a claim that every version combination has end-to-end release evidence. The current automated browser evidence covers:
 
@@ -44,28 +44,31 @@ See the [capability and verification matrix](docs/capabilities.md) for exact beh
 
 - Consumer project: Node.js 16.20.2 or later.
 - Repository development: Node.js 20.19.0 or later and pnpm 10 or later.
-- Vue 2.6, Vue 2.7, or Vue 3.2+ with a supported bundler configuration.
+- Vue 2.6 (>=2.6.0 <2.7.0), Vue 2.7 (>=2.7.0 <2.8.0), or Vue 3 (>=3.2.0 <4.0.0) with a supported bundler configuration.
+- Package manager: npm, pnpm, or Yarn in node_modules mode. Bun and Yarn PnP are rejected by detect/doctor.
 - VS Code 1.90 or later, or a Cursor build compatible with the same stable Extension API.
 - The browser, development server, IDE Extension Host, and source workspace must run on the same local machine.
 
 ## Quick start
 
-To evaluate a local tarball first, build it from this repository:
+Install the public package from the registry in the target Vue project as a development dependency:
+
+~~~powershell
+npm install --save-dev web-source-inspector
+~~~
+
+For pre-release validation of a local package artifact only, build it from this repository:
 
 ~~~powershell
 pnpm install
 pnpm package:npm
 ~~~
 
-Install the generated web-source-inspector-0.1.0-beta.2.tgz in the target Vue project as a development dependency. After a registry release, the equivalent command will be:
-
-~~~powershell
-npm install --save-dev web-source-inspector
-~~~
+Then install the generated `web-source-inspector-0.1.0-beta.3.tgz` in place of the registry package as the target project's development dependency. The local tarball is not the normal installation path.
 
 ### Option 1: enable from the terminal
 
-In the Vue project where the local tarball is installed, run:
+In the target Vue project where `web-source-inspector` is installed, run:
 
 ~~~powershell
 npx web-source-inspector init
@@ -96,7 +99,7 @@ packages/vscode-extension/web-source-inspector.vsix
 
 In VS Code or Cursor, choose **Install from VSIX...**, select that file, reload when prompted, and open the trusted local Vue workspace. Run **Source Inspector: Enable Project**, review the plan and diff, and confirm the change.
 
-The extension invokes the same project-local CLI logic as the terminal workflow. It does not download packages, use a global CLI, or replace the project’s existing dev or serve command.
+The extension invokes the same project-local CLI logic as the terminal workflow. It does not download packages, use a global CLI, or provide a plugin-only, zero-project-integration path. It changes only supported build configuration after confirmation; it does not modify business source, `index.html`, routes, npm scripts, or the existing dev/serve command.
 
 ## Use the inspector
 
@@ -112,7 +115,9 @@ For advanced Vite options, configuration examples, extension commands, and setti
 
 ## Same-machine Vite IP access
 
-`browserAccess` defaults to `same-machine`, so a Vite page can be opened through a local network-interface IP on the same computer without an explicit plugin option. `server.host` must still permit that interface, such as `0.0.0.0` or the exact local IP. The server freezes local interface addresses and the actual listener port at startup; the browser socket address and Origin must match exactly. Configure `webSourceInspector({ browserAccess: 'loopback' })` to restrict access to loopback addresses. Restart the Dev Server after a network change. The Bridge always listens on `127.0.0.1`; deprecated `remoteBrowser` only accepts `false`, and proxies, forwarding, WSL, Docker, Remote SSH, phones, and other computers are unsupported.
+`browserAccess` defaults to `same-machine`, so a Vite page can be opened through loopback or a startup-snapshot local network-interface IP on the same computer. The plugin does not change `server.host`; the project must still allow that interface, such as `0.0.0.0`, `::`, or the exact local IP. The server freezes local interface addresses and the actual listener port at startup; for a non-loopback browser, the socket address and Origin literal IP, protocol, and port must match exactly. Configure `webSourceInspector({ browserAccess: 'loopback' })` to restrict access to loopback addresses. Restart the Dev Server after a network change. The Bridge always listens on `127.0.0.1`; deprecated `remoteBrowser` only accepts `false`, and proxies, forwarding, WSL, Docker, Dev Containers, Remote SSH, phones, and other computers are unsupported.
+
+Raw Webpack watch accepts an exact HTTP Origin only. An HTTPS Origin returns `RAW_WATCH_HTTPS_UNSUPPORTED`; a proxy or port forwarding does not make it supported.
 
 ## How it works
 
@@ -125,7 +130,7 @@ Vue SFC
   -> VS Code/Cursor extension revalidates the workspace and opens the source
 ~~~
 
-The Inspector is development-only. The Vite adapter creates a session only for a real development server; the Webpack adapter enables itself only in development mode with a usable development transport. A production build must not include the Runtime, source markers, browser events, Manifest, or Bridge.
+The Inspector is development-only. The Vite adapter creates a session only for a real development server and is a no-op for build, preview, or `enabled: false`; the Webpack adapter is a no-op outside development mode. A production build must not include the Runtime, source markers, browser events, Manifest, or Bridge.
 
 ## Workspace packages
 

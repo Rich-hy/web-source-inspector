@@ -121,5 +121,10 @@ export interface DoctorResult {
   recovered: boolean;
   configured: boolean;
   diagnostics: ProjectDiagnostic[];
-  errorCode?: 'TRANSACTION_CONFLICT' | 'PROJECT_LOCKED' | 'INTERNAL_ERROR';
+  errorCode?:
+    | 'TARGET_UNSUPPORTED'
+    | 'PLAN_CONTEXT_REQUIRED'
+    | 'TRANSACTION_CONFLICT'
+    | 'PROJECT_LOCKED'
+    | 'INTERNAL_ERROR';
 }

@@ -12,6 +12,8 @@
     "vue": "catalog:"
   },
   "devDependencies": {
+    "@vue/compiler-dom": "catalog:",
+    "@vue/compiler-sfc": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "web-source-inspector": "workspace:*",
     "vite": "catalog:",

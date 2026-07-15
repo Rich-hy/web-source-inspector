@@ -11,9 +11,18 @@
 
 `@web-source-inspector/*` workspace 包均为内部私有实现，不单独发布。未来 Three.js、React 或其它框架 adapter 是否拆包，需要在公共 API 稳定后单独评审。
 
-当前 npm 发布候选为 `0.1.0-beta.2`；npm 与各 extension marketplace 的发布状态需要分别查询确认。
+当前发布候选的 npm 产品基线为 `web-source-inspector@0.1.0-beta.3`，对应手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。两者的发布状态彼此独立，且该记录不代表 npm registry、VS Code Marketplace 或 Cursor 的实际发布状态；每次发布前都必须分别查询和记录。
 
-当前已生成本地 npm tgz 和 VSIX；tgz 的 24 项归档白名单、exports、Node.js 16.20.2 安装后根/Vite/Webpack CJS/ESM、物理 Loader 与 CLI doctor smoke，以及 VSIX 的 7 项归档白名单和 bundle freshness 已验证。当前类型检查覆盖 15 个 workspace 项目，单元/集成测试为 `239/239`；Browser E2E 包含 Vite 7 项和 Webpack 1 项，Extension Host trusted/untrusted 场景通过。Vite basic 与 Webpack basic 的生产构建及 Inspector/绝对路径扫描通过。VS Code 1.90、当前 VS Code 和 Cursor 的真实 VSIX 安装 smoke，以及 Element Plus、monorepo 和 Browser -> Bridge -> IDE 完整链路仍未形成发布证据。
+## 独立版本与发布
+
+npm 包和 VSIX 是两个独立发布单元：
+
+1. 为公开 npm 包确定版本，构建并检查 tarball，再按目标 dist-tag 发布到 npm。
+2. 为扩展 manifest 确定版本，构建并检查 VSIX，再单独上传到目标 marketplace 或分发该 VSIX。
+3. `npm publish` 不会发布或更新 VSIX；上传 VSIX 也不会安装或更新消费者项目内的 npm 依赖。
+4. 消费者需要兼容的 VSIX 与项目本地 `web-source-inspector` 依赖。扩展只能调用工作区内 CLI，展示可审阅 diff，并在用户确认后写入静态安全配置；扩展不会自动安装依赖，也不支持仅安装扩展的零项目改动流程。
+
+不在本文件中提前声明某个本地 tgz、VSIX、测试结果或 smoke 结果为当前发布证据。它们必须由本次候选版本的实际命令和安装验证重新生成。
 
 ## 版本规则
 
@@ -22,20 +31,18 @@
 - 同 major 的新增能力通过 capabilities 协商，不以包版本猜测功能。
 - session 文件使用独立 `schemaVersion`；不兼容 schema 必须明确拒绝或提供受测迁移读取。
 - server 与 extension 可以版本不同，但必须通过协议和 capability 验证。
-- Vue/Vite/Webpack/Vue CLI 支持范围只能依据 fixture 矩阵发布。
+- Vue/Vite/Webpack/Vue CLI 支持范围以代码中的兼容性门槛为准，并由 fixture 和真实消费项目验证；范围命中仍必须通过实际 Vue plugin、`vue-loader`、compiler、webpack-dev-server 与上游 peer dependency 校验。
 - 配置弃用至少保留一个 minor 周期，并给出替代项和删除版本。
 
-## 0.1.0-beta.2 默认同机网卡 IP 验收
+## 当前基线：同机网卡 IP
 
-`browserAccess` 默认 `same-machine`，Vite 在 `server.host` 允许本机网卡访问时无需额外插件配置。显式 `browserAccess: 'loopback'` 保留为只允许回环浏览器的收紧选项。发布记录必须分别保留：实际 listener 端口与冻结 `devOrigins`、Bridge 仍监听 `127.0.0.1`、localhost/127.0.0.1/本机网卡 IP 的开发态证据，以及生产构建无 Runtime/Bridge 特征的扫描结果。没有第二设备或隔离 VM 的拒绝证据时，只能声明本机网卡 IP 可用，不能声明远端设备已验证拒绝。代理、端口转发、WSL、Docker、Dev Container 和 Remote SSH 不支持。
+`browserAccess` 默认 `same-machine`，Vite 在项目自身的 `server.host` 已允许本机网卡访问时无需额外插件配置。初始化流程不会修改 `server.host`。显式 `browserAccess: 'loopback'` 保留为只允许回环浏览器的收紧选项。Bridge 始终监听 `127.0.0.1`。发布记录必须分别保留：实际 listener 端口与冻结 `devOrigins`、localhost/127.0.0.1/本机网卡 IP 的开发态证据，以及生产构建无 Runtime/Bridge 特征的扫描结果。没有第二设备或隔离 VM 的拒绝证据时，只能声明本机网卡 IP 可用，不能声明远端设备已验证拒绝。代理、端口转发、WSL、Docker、Dev Container 和 Remote SSH 不支持。
 
-本次 `0.1.0-beta.2` 必须重新保留聚焦测试、类型检查、构建和 tgz 检查证据；其中其它设备或隔离 VM 的拒绝证据仍未取得。
+Raw Webpack watch 仅接受精确的 `http:` Origin；`https:` Origin 不支持且必须拒绝。Webpack dev-server 仅支持 3.x 或 `>=4.7.0 <5.0.0`。
 
-## 0.1.0-beta.1 同机网卡 IP 验收（历史）
+兼容性范围：Vue 2.6 为 `>=2.6.0 <2.7.0`，Vue 2.7 为 `>=2.7.0 <2.8.0`，Vue 3 为 `>=3.2.0 <4.0.0`；Vite 为 `>=2.9.0 <7.0.0`，Webpack 为 `>=4.0.0 <6.0.0`，Vue CLI 为 3 至 5。每个候选项目还必须满足实际 Vue plugin、`vue-loader`、compiler、webpack-dev-server 和上游 peer dependency 兼容性；不能将这些范围解释为任意版本组合均可用。Vue 2.6 的 `vue-template-compiler` 必须与实际 `vue` 完整版本一致；Vue 2.7 必须能从实际 `vue` package anchor 解析 `vue/compiler-sfc`，不要求独立 `@vue/compiler-*` 包完整版本相等；Vue 3 的 `@vue/compiler-sfc` 与 `@vue/compiler-dom` 必须都存在，且各自完整版本等于实际 `vue`。
 
-`browserAccess` 默认 `loopback`，Vite 的 `same-machine` 只用于同一台电脑的本机网卡地址。发布记录必须分别保留：实际 listener 端口与冻结 `devOrigins`、Bridge 仍监听 `127.0.0.1`、localhost/127.0.0.1/本机网卡 IP 的开发态证据，以及生产构建无 Runtime/Bridge 特征的扫描结果。没有第二设备或隔离 VM 的拒绝证据时，只能声明本机网卡 IP 可用，不能声明远端设备已验证拒绝。代理、端口转发、WSL、Docker、Dev Container 和 Remote SSH 不支持。
-
-本次 `0.1.0-beta.1` 证据：Vite `6.4.3` 聚焦测试和默认 loopback fixture 的本机网卡 IP 拒绝、消费项目 Vite `6.4.1` 的 localhost/127.0.0.1/`192.168.8.155` Runtime 与 Cursor 回执、Bridge loopback 检查、生产构建扫描均已执行。未取得第二设备或隔离 VM 的拒绝证据。
+`vue-loader` 15/16/17 官方没有 Vue peer，因此 Vue family 不因缺失该 peer 被阻断：应由实际 `vue/package.json` 版本判定，并继续满足对应 Vue family 的 compiler 证据要求。对于 Webpack/Vue CLI，再校验 `vue-loader` 主版本与该 Vue family 匹配且其 webpack peer 满足要求；Vite 不使用 `vue-loader`。
 
 ## 发布前阻断项
 
@@ -73,7 +80,7 @@ pnpm package:vsix
 
 每个命令需要保留完整退出码和关键结果。静态检查、单元测试、浏览器 E2E、构建和真实 IDE smoke 覆盖范围不同，不能互相替代。
 
-### 当前 Browser E2E 证据
+### Browser E2E 必要覆盖范围
 
 - Inspector 按钮只在 dev 页面出现。
 - 操作 Inspector 按钮不会触发页面级 pointer 监听。
@@ -85,7 +92,7 @@ pnpm package:vsix
 - `Esc` 退出后业务 click 恢复。
 - tooltip 不展示路径或行列，Browser 协议不含这些字段。
 
-以上在 Vite basic fixture 中合并为 7 项用例。Webpack basic fixture 的 1 项用例另覆盖真实 Loader、43 字符 marker、Runtime、WDS stream/hello 和 metadata request。发布门槛还需要 Element Plus 调用点、monorepo、HMR stale、多 tab 和真实 Bridge -> IDE 打开验证，不能由这两个 basic suite 替代。
+Vite 与 Webpack basic fixture 都必须覆盖各自的真实运行时、marker、Loader 或 plugin 注入、开发服务器握手和 metadata 请求。发布门槛还需要 Element Plus 调用点、monorepo、HMR stale、多 tab 和真实 Browser -> Bridge -> IDE 打开验证，不能由 basic suite 替代。
 
 ### Extension 安全最低证据
 

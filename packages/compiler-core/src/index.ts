@@ -5,3 +5,5 @@ export * from './generation';
 export * from './manifest';
 export * from './path';
 export * from './source-id';
+export * from './project-package-facts';
+export * from './toolchain-compatibility';

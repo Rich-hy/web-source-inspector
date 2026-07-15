@@ -62,7 +62,7 @@ export function createIntegrationState(
     baseDigest: string | 'ABSENT';
     operations: readonly AstOperation[];
   }>,
-  packageVersion = '0.1.0-beta.2',
+  packageVersion = '0.1.0-beta.3',
 ): IntegrationState {
   if (!profile.adapter) {
     throw new Error('缺少 Adapter，不能创建 integration state');

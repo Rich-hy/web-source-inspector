@@ -98,15 +98,19 @@ export function resolveVueLoaderMajor(
   compiler: WebpackCompilerLike,
   explicitMajor: VueLoaderMajor | undefined,
 ): VueLoaderMajor {
-  if (explicitMajor !== undefined) {
+  const context = path.resolve(compiler.options?.context ?? compiler.context ?? process.cwd());
+  if (explicitMajor !== undefined && !fs.existsSync(path.join(context, 'package.json'))) {
     return explicitMajor;
   }
-  const context = path.resolve(compiler.options?.context ?? compiler.context ?? process.cwd());
   const packageRequire = createRequire(path.join(context, 'package.json'));
   let packagePath: string;
   try {
     packagePath = packageRequire.resolve('vue-loader/package.json');
   } catch {
+    if (explicitMajor !== undefined) {
+      // 仅保留给无真实项目根的受控测试/高级嵌入场景；正常项目会在运行期 preflight 阻断。
+      return explicitMajor;
+    }
     throw pipelineError('无法从消费项目解析 vue-loader/package.json');
   }
   const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { version?: unknown };
@@ -115,6 +119,9 @@ export function resolveVueLoaderMajor(
   const major = match ? Number(match[1]) : Number.NaN;
   if (major !== 15 && major !== 16 && major !== 17) {
     throw pipelineError(`仅支持 vue-loader 15/16/17，检测到 ${String(version)}`);
+  }
+  if (explicitMajor !== undefined && explicitMajor !== major) {
+    throw pipelineError('显式 vueLoaderMajor 与实际 vue-loader 版本不一致');
   }
   return major;
 }

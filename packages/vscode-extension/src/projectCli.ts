@@ -78,6 +78,8 @@ const MUTATION_ERROR_CODES = new Set([
 ]);
 
 const DOCTOR_ERROR_CODES = new Set([
+  'TARGET_UNSUPPORTED',
+  'PLAN_CONTEXT_REQUIRED',
   'TRANSACTION_CONFLICT',
   'PROJECT_LOCKED',
   'INTERNAL_ERROR',
@@ -113,6 +115,7 @@ function normalizedBusinessErrorCode(value: string): ProtocolErrorCode | undefin
     case 'PLAN_STALE':
     case 'RECOVERY_REQUIRED':
     case 'TRANSACTION_CONFLICT':
+    case 'TARGET_UNSUPPORTED':
     case 'INTERNAL_ERROR':
       return value;
     default:

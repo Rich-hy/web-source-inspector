@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 
@@ -54,10 +54,12 @@ describe('webSourceInspectorWebpackLoader', () => {
     expect(callbackArguments?.[3]).toBe(additionalData);
   });
 
-  it('读取完整 SFC、校验最终 chain，并只返回带 marker 的 template', async () => {
+  it('workspace link 的完整 SFC 可转换，并只返回带 marker 的 template', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-loader-'));
     onTestFinished(() => rmSync(root, { recursive: true, force: true }));
-    const resourcePath = path.join(root, 'src', 'App.vue');
+    const sourcePath = path.join(root, 'packages', 'linked', 'App.vue');
+    const linkedDirectory = path.join(root, 'node_modules', '@workspace', 'linked');
+    const resourcePath = path.join(linkedDirectory, 'App.vue');
     const vueLoaderDirectory = path.join(root, 'node_modules', 'vue-loader', 'dist');
     mkdirSync(vueLoaderDirectory, { recursive: true });
     writeFileSync(
@@ -73,6 +75,14 @@ describe('webSourceInspectorWebpackLoader', () => {
       '<template><div class="root"><span>你好</span></div></template>',
       '<script setup lang="ts">const value: number = 1</script>',
     ].join('\n');
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(sourcePath, fullSource, 'utf8');
+    mkdirSync(path.dirname(linkedDirectory), { recursive: true });
+    symlinkSync(
+      path.dirname(sourcePath),
+      linkedDirectory,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const templateSource = '<div class="root"><span>你好</span></div>';
     const ruleUse: Array<string | { loader: string; options?: unknown }> = [
       WebSourceInspectorWebpackPlugin.loaderPath,
@@ -122,7 +132,7 @@ describe('webSourceInspectorWebpackLoader', () => {
       | WsiBuildMetadata
       | undefined;
     expect(metadata?.records.length).toBe(2);
-    expect(metadata?.moduleId).toBe('src/App.vue');
+    expect(metadata?.moduleId).toBe('packages/linked/App.vue');
     expect(metadata?.loaderPath).toBe(WebSourceInspectorWebpackPlugin.loaderPath);
     const descriptor = (
       createRequire(import.meta.url)(path.join(vueLoaderDirectory, 'descriptorCache.js')) as {
@@ -137,6 +147,8 @@ describe('webSourceInspectorWebpackLoader', () => {
     onTestFinished(() => rmSync(root, { recursive: true, force: true }));
     const resourcePath = path.join(root, 'src', 'App.vue');
     const fullSource = '<template>\r\n  <div>\r\n    <MyCard />\r\n  </div>\r\n</template>';
+    mkdirSync(path.dirname(resourcePath), { recursive: true });
+    writeFileSync(resourcePath, fullSource, 'utf8');
     const incomingTemplate = '\n<div>\n  <MyCard />\n</div>\n';
     const vueLoaderPath = path.join(root, 'node_modules', 'vue-loader', 'lib', 'index.js');
     const ruleUse: Array<string | { loader: string; options?: unknown }> = [
@@ -250,6 +262,66 @@ describe('webSourceInspectorWebpackLoader', () => {
     expect(result?.[1]).toBe('const value = 1');
     expect(result?.[2]).toBe(sourceMap);
     expect(result?.[3]).toBe(additionalData);
+  });
+
+  it('第三方 Vue template 在读取 identity、文件系统或 compiler 前清理 metadata 并保留回调 identity', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'wsi-webpack-loader-dependency-'));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const resourcePath = path.join(root, 'node_modules', 'dependency', 'Dependency.vue');
+    const fullSource = '<template><div /></template>';
+    mkdirSync(path.dirname(resourcePath), { recursive: true });
+    writeFileSync(resourcePath, fullSource, 'utf8');
+    const ruleUse: Array<string | { loader: string; options?: unknown }> = [
+      WebSourceInspectorWebpackPlugin.loaderPath,
+      path.join(root, 'node_modules', 'vue-loader', 'dist', 'index.js'),
+    ];
+    const compiler = createCompiler(root, ruleUse, resourcePath, fullSource);
+    new WebSourceInspectorWebpackPlugin({
+      root,
+      vueLoaderMajor: 17,
+      browserTransport: 'none',
+    }).apply(compiler);
+    compiler.inputFileSystem = {
+      readFile() {
+        throw new Error('不应读取第三方完整 SFC');
+      },
+    };
+
+    const source = Buffer.from('<div />');
+    const sourceMap = { source: 'vue-loader-map' };
+    const additionalData = { owner: 'vue-loader' };
+    const webpackModule: WebpackModuleLike = {
+      buildInfo: { [WSI_BUILD_METADATA_KEY]: { stale: true } },
+    };
+    let callbackCount = 0;
+    let callbackArguments: Parameters<WebpackLoaderCallback> | null = null;
+    webSourceInspectorWebpackLoader.call(
+      {
+        resourcePath,
+        resourceQuery: '?vue&type=template&id=abc',
+        loaderIndex: 0,
+        loaders: [],
+        _compiler: compiler,
+        _module: webpackModule,
+        getOptions() {
+          throw new Error('不应读取 WSI Loader identity');
+        },
+        async: () => (...arguments_) => {
+          callbackCount += 1;
+          callbackArguments = arguments_;
+        },
+      },
+      source,
+      sourceMap,
+      additionalData,
+    );
+
+    expect(callbackCount).toBe(1);
+    expect(callbackArguments?.[0]).toBeNull();
+    expect(callbackArguments?.[1]).toBe(source);
+    expect(callbackArguments?.[2]).toBe(sourceMap);
+    expect(callbackArguments?.[3]).toBe(additionalData);
+    expect(webpackModule.buildInfo?.[WSI_BUILD_METADATA_KEY]).toBeUndefined();
   });
 
   it('Pug 与 external src template 在读取 identity、文件系统或 compiler 前严格旁路', () => {

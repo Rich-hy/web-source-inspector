@@ -41,6 +41,30 @@ export default { plugins: [vue()] }
     });
   });
 
+  it('requires one Vue plugin call and the detected Vue plugin package', () => {
+    const duplicate = transformViteConfig(
+      "import vue from '@vitejs/plugin-vue'\n"
+      + "import vue2 from '@vitejs/plugin-vue2'\n"
+      + 'export default { plugins: [vue(), vue2()] }\n',
+      'esm',
+      { expectedVuePluginPackage: '@vitejs/plugin-vue' },
+    );
+    const mismatch = transformViteConfig(
+      "import vue from '@vitejs/plugin-vue'\nexport default { plugins: [vue()] }\n",
+      'esm',
+      { expectedVuePluginPackage: '@vitejs/plugin-vue2' },
+    );
+    const accepted = transformViteConfig(
+      "import vue from '@vitejs/plugin-vue'\nexport default { plugins: [vue()] }\n",
+      'esm',
+      { expectedVuePluginPackage: '@vitejs/plugin-vue' },
+    );
+
+    expect(duplicate).toMatchObject({ ok: false, errorCode: 'VITE_VUE_PLUGIN_NOT_UNIQUE' });
+    expect(mismatch).toMatchObject({ ok: false, errorCode: 'VITE_VUE_PLUGIN_MISMATCH' });
+    expect(accepted.ok).toBe(true);
+  });
+
   it('changes only static browserAccess option objects', () => {
     const sourceFor = (call: string) => `import vue from '@vitejs/plugin-vue'
 import { webSourceInspector } from 'web-source-inspector/vite'
@@ -246,6 +270,38 @@ module.exports = {
     expect(removed.ok).toBe(true);
     expect(removed.code).not.toContain('web-source-inspector/webpack');
     expect(removed.code).not.toContain('loaderPath');
+  });
+
+  it('requires statically proven development mode and entry only for automatic integration', () => {
+    const staticConfig = webpackSource.replace(
+      'module.exports = {',
+      "module.exports = { mode: 'development', entry: './src/main.ts',",
+    );
+    const missingMode = transformWebpackConfig(webpackSource, {
+      moduleKind: 'commonjs',
+      allowedOrigin: 'http://localhost:8080',
+      requireStaticSafety: true,
+    });
+    const dynamicEntry = transformWebpackConfig(
+      staticConfig.replace("entry: './src/main.ts'", 'entry: createEntry()'),
+      {
+        moduleKind: 'commonjs',
+        allowedOrigin: 'http://localhost:8080',
+        requireStaticSafety: true,
+      },
+    );
+    const accepted = transformWebpackConfig(staticConfig, {
+      moduleKind: 'commonjs',
+      allowedOrigin: 'http://localhost:8080',
+      requireStaticSafety: true,
+    });
+
+    expect(missingMode).toMatchObject({
+      ok: false,
+      errorCode: 'WEBPACK_DEVELOPMENT_MODE_REQUIRED',
+    });
+    expect(dynamicEntry).toMatchObject({ ok: false, errorCode: 'DYNAMIC_ENTRY_UNSUPPORTED' });
+    expect(accepted.ok).toBe(true);
   });
 
   it('adds an absent WDS hook, wraps static hooks, and rejects dynamic returns', () => {

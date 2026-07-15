@@ -168,6 +168,7 @@ function planErrorCode(plan: IntegrationPlan | RemovalPlan): ProtocolErrorCode |
 
 function mutationErrorCode(value: string | undefined): ProtocolErrorCode {
   switch (value) {
+    case 'TARGET_UNSUPPORTED':
     case 'PLAN_CONTEXT_REQUIRED':
     case 'PLAN_STALE':
     case 'RECOVERY_REQUIRED':

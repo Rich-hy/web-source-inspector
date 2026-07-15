@@ -61,6 +61,24 @@ describe('transformVueSfc', () => {
     expect(result.code).toContain(`<main ${SOURCE_ATTRIBUTE}=`);
   });
 
+  it('拒绝与实际 vue/package.json 不一致的显式 Vue 版本', () => {
+    const result = transformVueSfc({
+      source: '<template><main /></template>',
+      filename: 'D:/workspace/src/Demo.vue',
+      rootKey: 'workspace-root',
+      relativePath: 'src/Demo.vue',
+      moduleId: 'D:/workspace/src/Demo.vue',
+      compilerRoot: fileURLToPath(new URL('..', import.meta.url)),
+      vueVersion: '3.0.0',
+      createSourceId: deterministicSourceId,
+    });
+
+    expect(result.transformed).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'COMPILER_RESOLUTION_ERROR' }),
+    ]);
+  });
+
   it('注入原生元素和组件，并保留父级与组件调用点候选', () => {
     const source = `<script setup lang="ts">
 const onClick = () => undefined

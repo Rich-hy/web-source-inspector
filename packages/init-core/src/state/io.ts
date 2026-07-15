@@ -15,6 +15,8 @@ import {
   type IntegrationStateNode,
 } from './types';
 
+// 仅用于读取和卸载历史 state；当前项目兼容性必须由共享 evaluator 判断。
+const LEGACY_STATE_VITE_RANGE = '>=2 <7';
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 const NODE_DETAIL_KEYS = new Set([
   'action',
@@ -187,7 +189,7 @@ function validProfile(
       && hasExactKeys(profile, ['bundler', 'vueVersion', 'viteVersion'])
       && typeof profile.viteVersion === 'string'
       && semver.valid(profile.viteVersion) !== null
-      && semver.satisfies(profile.viteVersion, '>=2 <7');
+      && semver.satisfies(profile.viteVersion, LEGACY_STATE_VITE_RANGE);
   }
   if (bundler !== 'webpack' && bundler !== 'vue-cli') {
     return false;

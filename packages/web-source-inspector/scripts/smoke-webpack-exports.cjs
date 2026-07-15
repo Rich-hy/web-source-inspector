@@ -78,7 +78,8 @@ function assertPhysicalBundleRegistry(moduleExports) {
   }).apply(compiler);
 
   const loaderContext = {
-    resourcePath: path.join(packageRoot, 'src', 'App.vue'),
+    // source-boundary 只转换可 realpath 的工作区源码，使用真实 fixture 避免把失效路径误当作 session 回归。
+    resourcePath: path.join(packageRoot, '..', '..', 'fixtures', 'vue-webpack-basic', 'src', 'App.vue'),
     resourceQuery: '?vue&type=template&id=smoke',
     loaderIndex: 0,
     loaders: [],

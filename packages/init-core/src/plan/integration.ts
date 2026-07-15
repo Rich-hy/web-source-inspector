@@ -1,4 +1,3 @@
-import semver from 'semver';
 import { removeViteIntegration, transformViteConfig } from '../ast/vite';
 import {
   removeVueCliIntegration,
@@ -42,7 +41,7 @@ import type {
   PlannedFileEdit,
 } from './types';
 
-const KNOWN_ANSWERS = new Set(['bundler', 'allowedOrigin', 'browserAccess']);
+const KNOWN_ANSWERS = new Set(['bundler', 'transport', 'allowedOrigin', 'browserAccess']);
 
 function normalizedAnswers(
   answers: Readonly<Record<string, string>> | undefined,
@@ -76,6 +75,12 @@ function validateAnswers(
       diagnostic(diagnostics, 'INVALID_ANSWER', 'browserAccess 只能是 loopback 或 same-machine。');
     } else if (key === 'browserAccess' && profile.bundler !== 'vite') {
       diagnostic(diagnostics, 'INVALID_ANSWER', 'browserAccess 仅支持 Vite 项目。');
+    } else if (key === 'transport'
+      && value !== 'wds'
+      && value !== 'raw-watch') {
+      diagnostic(diagnostics, 'INVALID_ANSWER', 'transport 只能是 wds 或 raw-watch。');
+    } else if (key === 'transport' && profile.bundler !== 'webpack') {
+      diagnostic(diagnostics, 'INVALID_ANSWER', 'transport 仅支持 Webpack 项目。');
     }
   }
 }
@@ -86,16 +91,11 @@ function browserAccessAnswer(answers: Record<string, string>): BrowserAccessMode
 }
 
 function wdsMajor(profile: ProjectProfile): 3 | 4 | undefined {
-  const usesDevServer = profile.bundler === 'vue-cli'
-    || profile.devCommands.some((item) => item.bundler === 'webpack'
-      && /(?:webpack-dev-server|webpack\s+serve)\b/u.test(item.command));
-  if (!usesDevServer) {
+  if (profile.toolchain?.transport !== 'wds') {
     return undefined;
   }
-  const version = profile.webpackDevServer
-    ? semver.coerce(profile.webpackDevServer.version)
-    : null;
-  return version?.major === 3 || version?.major === 4 ? version.major : undefined;
+  const major = profile.toolchain.webpackDevServerMajor;
+  return major === 3 || major === 4 ? major : undefined;
 }
 
 function selectConfig(profile: ProjectProfile): {
@@ -131,6 +131,7 @@ function transformConfig(
   if (profile.bundler === 'vite') {
     return transformViteConfig(source, moduleKind, {
       browserAccess: browserAccessAnswer(answers),
+      expectedVuePluginPackage: profile.viteVuePlugin?.name,
     });
   }
   if (profile.bundler === 'webpack') {
@@ -138,6 +139,7 @@ function transformConfig(
       moduleKind,
       webpackDevServerMajor: wdsMajor(profile),
       allowedOrigin: answers.allowedOrigin,
+      requireStaticSafety: true,
     });
   }
   if (profile.bundler === 'vue-cli') {

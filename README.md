@@ -6,19 +6,19 @@ Web Source Inspector 用于在 Vue 开发页面中选择一个元素，并在 VS
 
 定位由项目端 Adapter、浏览器 Runtime、本机 Loopback Bridge 和 IDE 扩展协同完成。浏览器只提交不透明的 <code>sourceId</code>、认证 token 与必要会话元数据；不会上传本机文件路径、源码范围或 IDE Bridge 凭据。
 
-> **版本状态：** 当前为 <code>0.1.0-beta.2</code> 发布候选。npm 包与 VSIX 的发布状态应分别以对应仓库查询结果为准；真实 VS Code/Cursor 安装验证仍应在发布前单独留存证据。
+> **当前基线：** npm <code>web-source-inspector@0.1.0-beta.3</code>，手动安装 VSIX <code>web-source-inspector-vscode@0.1.1</code>。两者是独立分发物；版本可安装、运行期 tuple 兼容和真实编辑器验证是不同结论，具体证据见[能力矩阵](docs/capabilities.md)。
 
 ## 核心能力
 
 - 普通 DOM、组件调用、<code>v-for</code>、条件分支、Slot、Fragment、动态组件和 Teleport 的源码 marker。
 - Shadow DOM Inspector：支持 hover 高亮、无路径 tooltip、<code>Alt+Shift+C</code> 快捷键与业务事件隔离。
-- 通过 CLI 或 VS Code/Cursor 扩展检测并接入 Vite、Webpack、Vue CLI 配置；接入前会展示计划，无法安全识别的动态配置不会猜测改写。
+- 通过 CLI 或 VS Code/Cursor 扩展检测并接入 Vite、Webpack、Vue CLI 配置；扩展只调用工作区内的 CLI，先展示计划和 diff，用户确认后才写入配置。无法安全识别的动态配置不会猜测改写。
 - 支持 HMR generation、旧 <code>sourceId</code> tombstone、内存 Manifest，以及多浏览器 Tab / 多 IDE 的会话路由。
 - 使用仅监听 loopback 的认证 Bridge、Workspace Trust、realpath 路径校验和未保存内容附近校正，限制来源定位只在可信本机 workspace 内执行。
 
 ## 支持范围与限制
 
-- 实现范围为 Vue 2.6、Vue 2.7、Vue 3.2+，以及 Vite 2～6、Webpack 4/5、Vue CLI 3/4/5 的标准配置形态；每个版本组合的实际验证状态以 [能力矩阵](docs/capabilities.md) 为准。
+- 可安装的 peer 范围为 Vue 2.6（>=2.6.0 <2.7.0）、Vue 2.7（>=2.7.0 <2.8.0）或 Vue 3（>=3.2.0 <4.0.0），以及 Vite >=2.9.0 <7.0.0、Webpack >=4 <6、Vue CLI 3-5。运行期还会校验实际 Vue plugin、vue-loader、compiler、Webpack Dev Server 与 raw transport 是否满足上游 peer 规则。官方 `vue-loader` 15/16/17 不声明 Vue peer；Vue family 由实际 `vue/package.json` 完整版本判定。Webpack/Vue CLI 路径再校验 vue-loader 主版本是否与该 Vue family 匹配，并校验其 Webpack peer；Vite 路径不依赖 vue-loader。compiler 证据按 family 校验：Vue 2.6 的 `vue-template-compiler` 必须与实际 Vue 完整版本一致；Vue 2.7 必须从实际 `vue` package anchor 解析 `vue/compiler-sfc`；Vue 3 的 `@vue/compiler-sfc` 和 `@vue/compiler-dom` 都必须存在，且分别与实际 Vue 完整版本一致。包管理器合同支持 npm、pnpm 及 node_modules 模式的 Yarn；Bun 和 Yarn PnP 会由 detect/doctor 拒绝。该合同不等于 npm/Yarn 项目的真实 fixture/E2E 证据，后者仍以[能力矩阵](docs/capabilities.md)单独列示为准。可安装范围不等于任意实际 tuple 都兼容或已验证。每个版本组合的证据以[能力矩阵](docs/capabilities.md)为准。
 - 第三方组件内部模板默认不转换，会降级定位到用户项目中的组件调用点。
 - 当前不承诺 Three.js/Canvas 对象、React、SSR、Pug/MDX、WSL、Remote SSH、Dev Container 或 Codespaces；其它设备上的远程浏览器也不在支持范围内。
 
@@ -39,13 +39,13 @@ Web Source Inspector 用于在 Vue 开发页面中选择一个元素，并在 VS
 
 业务项目需要 Node.js <code>>=16.20.2</code>、受支持的 Vue 与构建工具组合，以及 VS Code <code>>=1.90</code> 或兼容的 Cursor。浏览器、开发服务器、IDE Extension Host 与源码 workspace 必须位于同一台本机；仓库开发环境要求见 [本地开发](#本地开发)。
 
-先在 Vue 项目中安装唯一公开 npm 包：
+先在目标 Vue 项目中安装唯一公开 npm 包作为开发依赖：
 
 ```powershell
 npm install -D web-source-inspector
 ```
 
-本地验收时可先在本仓库执行 `pnpm package:npm`，再把生成的 `.tgz` 作为 devDependency 安装到目标项目；npm 发布后可直接使用上面的 registry 安装命令。
+本地打包产生的 `.tgz` 只用于本仓库或消费项目的包验收；正式接入仍要求目标项目拥有本地 `web-source-inspector` 开发依赖。
 
 然后选择任一入口完成一次项目接入：
 
@@ -53,7 +53,7 @@ npm install -D web-source-inspector
 npx web-source-inspector init
 ```
 
-或安装本仓库生成的 VSIX，在 VS Code/Cursor 中执行 **Source Inspector: Enable Project**。两个入口调用同一套检测、预览和安全写入逻辑；它们只修改受支持的 Vite、Webpack 或 Vue CLI 配置，不替换原有启动命令。
+或安装 VSIX，在 VS Code/Cursor 中执行 **Source Inspector: Enable Project**。扩展只调用当前工作区 `node_modules` 内的 CLI，不会自动安装 npm 包、使用全局 CLI 或提供“仅安装插件、零项目接入”路径。两个入口调用同一套检测、预览和安全写入逻辑；它们只修改受支持的 Vite、Webpack 或 Vue CLI 配置，不修改组件、路由、`index.html`、业务源码或原有启动命令。
 
 接入后继续执行项目原来的 `npm run dev`、`npm run serve` 或等价命令。开发页面出现 Inspector 按钮后，点击按钮或按 `Alt+Shift+C` 进入选择模式，再点击目标元素；已连接的 VS Code/Cursor 会打开对应 `.vue` 文件并定位 template 范围。
 
@@ -66,7 +66,9 @@ npx web-source-inspector remove
 
 ## 同机网卡 IP 访问（Vite）
 
-默认 `browserAccess` 为 `same-machine`，因此同一台电脑可直接通过本机网卡 IP 访问 Vite 页面。Vite 的 `server.host` 仍必须允许该网卡访问，例如 `0.0.0.0` 或精确的本机 IP。服务启动时会冻结本机接口地址和实际监听端口；浏览器的 socket 地址、页面 Origin 与该端口必须精确匹配。需要收紧为仅回环地址时，显式配置 `webSourceInspector({ browserAccess: 'loopback' })`。网卡变化后需要完整重启 Dev Server。Bridge 始终只监听 `127.0.0.1`，`remoteBrowser` 已弃用且只能为 `false`；代理、端口转发、WSL、Docker、Remote SSH、手机和其它电脑不受支持。
+默认 `browserAccess` 为 `same-machine`，因此同一台电脑可通过本机回环地址或启动时快照中的网卡 IP 访问 Vite 页面。插件不会修改 Vite 的 `server.host`；若需网卡访问，项目必须自行设置 `server.host` 为 `0.0.0.0`、`::` 或精确的本机 IP。服务启动时会冻结本机接口地址和实际监听端口；非回环浏览器的 socket 地址、页面 Origin 的字面量 IP、协议与该端口必须精确匹配。需要收紧为仅回环地址时，显式配置 `webSourceInspector({ browserAccess: 'loopback' })`。网卡变化后需要完整重启 Dev Server。Bridge 始终只监听 `127.0.0.1`，`remoteBrowser` 已弃用且只能为 `false`；代理、端口转发、WSL、Docker、Dev Container、Remote SSH、手机和其它电脑不受支持。
+
+Webpack raw watch 只接受精确的 HTTP Origin；HTTPS Origin 会返回 `RAW_WATCH_HTTPS_UNSUPPORTED`，不能通过代理或端口转发绕过。
 
 ## 完成一次定位
 
@@ -155,7 +157,7 @@ Playwright 首次运行前，如本机没有 Chromium，需要执行 <code>pnpm 
 
 ## 安全与生产边界
 
-Vite Adapter 仅在真实开发服务中创建 session；Webpack Adapter 只在 `mode: 'development'` 且存在可用开发传输时启用。生产构建不应注入 Runtime、`data-wsi-source`、`data-wsi-component-source`、浏览器事件、Manifest 或 Bridge。发布消费项目之前仍需按 [安全文档](docs/security.md#生产构建核验) 对实际产物执行字符串检查。
+Vite Adapter 仅在真实开发服务中创建 session，`build`、`preview` 或 `enabled: false` 时保持 no-op；Webpack Adapter 在非 `development` 模式保持 no-op。生产构建不应注入 Runtime、`data-wsi-source`、`data-wsi-component-source`、浏览器事件、Manifest 或 Bridge。发布消费项目之前仍需按 [安全文档](docs/security.md#生产构建核验) 对实际产物执行字符串检查。
 
 浏览器协议不携带本机路径或源码范围；IDE 扩展会在打开文件前再次校验 workspace root、相对路径与 realpath containment。Bridge 只监听 loopback，且受认证与会话路由保护；workspace 外文件始终拒绝打开。安全问题请按 [SECURITY.md](SECURITY.md) 中的流程私下报告。
 

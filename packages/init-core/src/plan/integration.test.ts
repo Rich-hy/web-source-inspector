@@ -63,6 +63,10 @@ function writePackage(
   workspaceRoot: string,
   name: string,
   version: string,
+  options: {
+    peerDependencies?: Record<string, string>;
+    engines?: Record<string, string>;
+  } = {},
 ): void {
   const packageDirectory = path.join(workspaceRoot, 'node_modules', ...name.split('/'));
   mkdirSync(packageDirectory, { recursive: true });
@@ -70,6 +74,8 @@ function writePackage(
     name,
     version,
     main: 'index.js',
+    ...(options.peerDependencies ? { peerDependencies: options.peerDependencies } : {}),
+    ...(options.engines ? { engines: options.engines } : {}),
   }), 'utf8');
   writeFileSync(path.join(packageDirectory, 'index.js'), 'module.exports = {}\n', 'utf8');
 }
@@ -85,8 +91,11 @@ function createViteWorkspace(): string {
   writeFileSync(path.join(workspaceRoot, 'package-lock.json'), '{}\n', 'utf8');
   writePackage(workspaceRoot, 'vue', '3.5.0');
   writePackage(workspaceRoot, 'vite', '6.0.0');
-  writePackage(workspaceRoot, '@vitejs/plugin-vue', '5.2.0');
+  writePackage(workspaceRoot, '@vitejs/plugin-vue', '5.2.0', {
+    peerDependencies: { vite: '^5.0.0 || ^6.0.0', vue: '^3.2.0' },
+  });
   writePackage(workspaceRoot, '@vue/compiler-sfc', '3.5.0');
+  writePackage(workspaceRoot, '@vue/compiler-dom', '3.5.0');
   writeFileSync(path.join(workspaceRoot, 'vite.config.ts'), `import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
@@ -110,14 +119,18 @@ function createWebpackWorkspace(vueCli: boolean): string {
   writeFileSync(path.join(workspaceRoot, 'package-lock.json'), '{}\n', 'utf8');
   writePackage(workspaceRoot, 'vue', '3.5.0');
   writePackage(workspaceRoot, 'webpack', '5.95.0');
-  writePackage(workspaceRoot, 'vue-loader', '17.4.2');
+  writePackage(workspaceRoot, 'vue-loader', '17.4.2', {
+    peerDependencies: { webpack: '^5.0.0', vue: '^3.2.0' },
+  });
   writePackage(workspaceRoot, '@vue/compiler-sfc', '3.5.0');
+  writePackage(workspaceRoot, '@vue/compiler-dom', '3.5.0');
   if (vueCli) {
     writePackage(workspaceRoot, '@vue/cli-service', '5.0.8');
     writePackage(workspaceRoot, 'webpack-dev-server', '4.15.2');
   } else {
     writeFileSync(path.join(workspaceRoot, 'webpack.config.js'), `const { VueLoaderPlugin } = require('vue-loader')
 module.exports = {
+  mode: 'development',
   module: { rules: [{ test: /\\.vue$/, use: ['vue-loader'] }] },
   plugins: [new VueLoaderPlugin()]
 }
@@ -607,6 +620,31 @@ export default defineConfig({
     writeFileSync(statePath, `${JSON.stringify(state)}\n`, 'utf8');
 
     expect(createRemovalPlan({ workspaceRoot }).blocked).toBe(true);
+  });
+
+  it('doctor reports current incompatibility without blocking removal of recorded state', () => {
+    const workspaceRoot = createViteWorkspace();
+    const plan = createIntegrationPlan({ workspaceRoot });
+    expect(applyIntegrationPlan({ workspaceRoot, planDigest: plan.planDigest }).ok).toBe(true);
+    writeFileSync(path.join(workspaceRoot, 'node_modules', 'vite', 'package.json'), JSON.stringify({
+      name: 'vite',
+      version: '7.0.0',
+      main: 'index.js',
+    }), 'utf8');
+
+    const doctor = doctorProject({ workspaceRoot });
+    const removal = createRemovalPlan({ workspaceRoot });
+
+    expect(doctor).toMatchObject({
+      ok: false,
+      configured: true,
+      errorCode: 'TARGET_UNSUPPORTED',
+    });
+    expect(removal.blocked).toBe(false);
+    expect(applyRemovalPlan({
+      workspaceRoot,
+      planDigest: removal.planDigest,
+    }).ok).toBe(true);
   });
 
   it('doctor restores a journaled after-image only when digest and identity match', () => {

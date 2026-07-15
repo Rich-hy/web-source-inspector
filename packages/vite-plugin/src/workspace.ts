@@ -1,19 +1,73 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
+const EXCLUDED_PATH_SEGMENTS = new Set(['node_modules', 'dist', '.git']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function declaresWorkspace(packageJsonPath: string): boolean {
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+    if (!isRecord(manifest)) {
+      return false;
+    }
+    const { workspaces } = manifest;
+    return Array.isArray(workspaces)
+      || (isRecord(workspaces) && Array.isArray(workspaces.packages));
+  } catch {
+    return false;
+  }
+}
+
+function canonicalizePath(pathname: string): string {
+  return realpathSync(path.resolve(pathname));
+}
+
+function tryCanonicalizePath(pathname: string): string | null {
+  try {
+    return canonicalizePath(pathname);
+  } catch {
+    return null;
+  }
+}
+
+function isPathInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return Boolean(relative)
+    && relative !== '..'
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+}
+
+function hasExcludedPathSegment(pathname: string): boolean {
+  return pathname
+    .split(/[\\/]+/)
+    .some((segment) => EXCLUDED_PATH_SEGMENTS.has(
+      process.platform === 'win32' ? segment.toLowerCase() : segment
+    ));
+}
+
 export function findWorkspaceRoot(viteRoot: string, explicitRoot?: string): string {
+  // 从真实路径向上扫描，避免 Junction 或 symlink 隐藏工作区根标记。
+  const canonicalViteRoot = canonicalizePath(viteRoot);
   if (explicitRoot) {
-    return realpathSync(path.resolve(viteRoot, explicitRoot));
+    return canonicalizePath(path.resolve(canonicalViteRoot, explicitRoot));
   }
 
-  let current = path.resolve(viteRoot);
+  let current = canonicalViteRoot;
   let packageRoot: string | undefined;
   while (true) {
     if (existsSync(path.join(current, 'pnpm-workspace.yaml'))) {
-      return realpathSync(current);
+      return current;
     }
-    if (!packageRoot && existsSync(path.join(current, 'package.json'))) {
-      packageRoot = current;
+    const packageJsonPath = path.join(current, 'package.json');
+    if (existsSync(packageJsonPath)) {
+      if (declaresWorkspace(packageJsonPath)) {
+        return current;
+      }
+      packageRoot ??= current;
     }
     const parent = path.dirname(current);
     if (parent === current) {
@@ -21,18 +75,20 @@ export function findWorkspaceRoot(viteRoot: string, explicitRoot?: string): stri
     }
     current = parent;
   }
-  return realpathSync(packageRoot || viteRoot);
+  return packageRoot || canonicalViteRoot;
 }
 
 export function toWireRelativePath(workspaceRoot: string, filename: string): string | null {
-  let canonicalFile: string;
-  try {
-    canonicalFile = realpathSync(filename);
-  } catch {
+  const canonicalRoot = tryCanonicalizePath(workspaceRoot);
+  const canonicalFile = tryCanonicalizePath(filename);
+  if (!canonicalRoot || !canonicalFile) {
     return null;
   }
-  const relative = path.relative(workspaceRoot, canonicalFile);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+  if (hasExcludedPathSegment(canonicalFile)) {
+    return null;
+  }
+  const relative = path.relative(canonicalRoot, canonicalFile);
+  if (!isPathInside(canonicalRoot, canonicalFile)) {
     return null;
   }
   const wirePath = relative.split(path.sep).join('/');
@@ -69,11 +125,14 @@ export function shouldTransform(
   include: Array<string | RegExp>,
   exclude: Array<string | RegExp>
 ): boolean {
-  const normalized = filename.replaceAll('\\', '/');
+  // 以真实路径建立源码边界，workspace 链接不因请求路径位于 node_modules 被误排除。
+  const canonicalFilename = tryCanonicalizePath(filename);
+  if (!canonicalFilename) {
+    return false;
+  }
+  const normalized = canonicalFilename.replaceAll('\\', '/');
   if (!normalized.endsWith('.vue')
-    || normalized.includes('/node_modules/')
-    || normalized.includes('/dist/')
-    || normalized.includes('/.git/')
+    || hasExcludedPathSegment(canonicalFilename)
     || exclude.some((pattern) => matchesPattern(normalized, pattern))) {
     return false;
   }
@@ -82,7 +141,7 @@ export function shouldTransform(
   }
   const allowedRoots = sourceRoots.length > 0 ? sourceRoots : [workspaceRoot];
   return allowedRoots.some((root) => {
-    const relative = path.relative(root, filename);
-    return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+    const canonicalRoot = tryCanonicalizePath(root);
+    return canonicalRoot !== null && isPathInside(canonicalRoot, canonicalFilename);
   });
 }

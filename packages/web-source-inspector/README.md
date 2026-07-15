@@ -8,24 +8,34 @@ Web Source Inspector connects a local Vue development page to VS Code or Cursor 
 - IDE companion: VS Code `>=1.90` or a Cursor build compatible with the same stable Extension API.
 - The development server, IDE Extension Host, browser, and source workspace must be on the same machine.
 
-| Vue | Vite release tuples | Webpack / Vue CLI release tuples |
-| --- | --- | --- |
-| Vue 2.6 | Initial-release tuple: Vue 2.6.x + Vite 2.x + `vite-plugin-vue2` 2.x + an exact-matching `vue-template-compiler`. Later Vite majors are not implied. | Representative tuple: Vue 2.6.x + Webpack 4 + `vue-loader` 15 + webpack-dev-server 3 + an exact-matching `vue-template-compiler`. Other Webpack 4/5 or Vue CLI 3-5 stacks are considered only when their selected releases are mutually compatible under upstream `peerDependencies`. |
-| Vue 2.7 | Initial-release tuple: Vue 2.7.x + Vite 3.x + `@vitejs/plugin-vue2` 2.x, using the SFC compiler shipped by Vue 2.7. Later Vite majors are not implied. | Representative tuple: Vue 2.7.x + Webpack 5 + `vue-loader` 15 + webpack-dev-server `>=4.7 <5`. Vue CLI is considered only when its bundled Webpack, `vue-loader`, and dev-server versions form an upstream-compatible stack. |
-| Vue 3.2+ | Planned tuple families: Vite 2 + `@vitejs/plugin-vue` 2; Vite 3 + plugin 3; Vite 4 + plugin 4; Vite 5 + plugin 5; and Vite 6 + a plugin 5 release whose published peer range includes Vite 6. Every tuple also requires a matching `@vue/compiler-sfc`. | Representative tuple: Vue 3.2+ + Webpack 5 + `vue-loader` 17 + webpack-dev-server `>=4.7 <5` + matching `@vue/compiler-sfc`. Webpack 4/5, `vue-loader` 16/17, and Vue CLI combinations are considered only where the selected upstream releases declare a compatible stack. |
+| Component | Supported range |
+| --- | --- |
+| Vue 2.6 | `>=2.6.0 <2.7.0` |
+| Vue 2.7 | `>=2.7.0 <2.8.0` |
+| Vue 3 | `>=3.2.0 <4.0.0` |
+| Vite | `>=2.9.0 <7.0.0` |
+| Webpack | `>=4.0.0 <6.0.0` |
+| Vue CLI | 3 through 5 |
+| webpack-dev-server | 3.x, or `>=4.7.0 <5.0.0` |
 
-Webpack dev-server support is limited to 3.x or `>=4.7 <5`. Raw Webpack watch mode asks for the exact HTTP(S) browser origin. The detector may recognize additional versions inside its implementation ranges, but recognition is not a claim that an arbitrary cross-product is supported. Current automated browser E2E evidence covers Vue 3.5.39 + Vite 6.4.3 + `@vitejs/plugin-vue` 5.2.4, and Vue 3.5.39 + Webpack 5.108.4 + `vue-loader` 17.4.2 + webpack-dev-server 4.15.2. A packaged VSIX has also been installed in Cursor and connected to the loopback Bridge of a Vue 2.7.16 + Vue CLI 3.12.1 + Webpack 4.47.0 + `vue-loader` 15.11.1 project. The final browser-click-to-file-open interaction and other tuples still require separate verification.
+An accepted project must satisfy more than these top-level ranges. The installed Vue plugin, `vue-loader`, Vue compiler, webpack-dev-server, and each package's upstream `peerDependencies` must form a compatible toolchain. Vue 2.6 requires `vue-template-compiler` to have the same full version as the actual `vue` package. Vue 2.7 must resolve `vue/compiler-sfc` from the actual `vue` package anchor; it does not require a separately installed `@vue/compiler-*` package to have an equal full version. Vue 3 requires both `@vue/compiler-sfc` and `@vue/compiler-dom` to exist, each with the same full version as the actual `vue` package. The CLI rejects a detected stack when that evidence is absent or incompatible instead of assuming that any version combination in the ranges works.
+
+`vue-loader` 15, 16, and 17 do not declare an official Vue peer dependency. Missing Vue peer evidence therefore does not block Vue-family detection: the actual `vue/package.json` version determines the Vue family, and the corresponding Vue-family compiler evidence requirements still apply. For Webpack and Vue CLI, the CLI then checks that the `vue-loader` major matches that Vue family and that its webpack peer dependency is satisfied. Vite does not use `vue-loader`.
+
+Raw Webpack watch mode accepts only an exact `http:` browser Origin. An `https:` Origin is unsupported and rejected.
 
 ## Install and manage integration
 
-This is a beta release for public validation. Install it through the `beta` dist-tag:
+Install the current npm baseline as a development dependency in the Vue project:
 
 ```sh
-npm install --save-dev web-source-inspector@beta
+npm install --save-dev web-source-inspector@0.1.0-beta.3
 npx web-source-inspector init
 ```
 
-`init` detects the framework and bundler, collects any required choices, prints the planned edits, and asks before writing. It only rewrites supported static configuration shapes and records created or reused ownership in `.web-source-inspector.json`.
+The only supported integration path is project-local: install this package, then let its workspace-local CLI detect the project, generate an auditable diff, and write supported static configuration only after confirmation. `init` records created or reused ownership in `.web-source-inspector.json`.
+
+The VS Code/Cursor extension is a companion to this flow. It calls the CLI resolved inside the opened workspace, shows the generated diff, and applies it only after confirmation. It never installs npm dependencies automatically. Installing the extension alone cannot enable inspection without a project dependency and project configuration change.
 
 ```sh
 npx web-source-inspector doctor
@@ -36,7 +46,7 @@ npx web-source-inspector remove
 
 ## Same-machine Vite IP access
 
-`browserAccess` defaults to `same-machine`, so a Vite project can use a local network-interface IP on the same computer without an explicit plugin option. `server.host` must permit that interface, the actual listener port and Origin must match exactly, and network changes require a Dev Server restart. Configure `webSourceInspector({ browserAccess: 'loopback' })` to limit browser access to loopback addresses. The IDE Bridge still binds only to `127.0.0.1`. `remoteBrowser` is deprecated and only accepts `false`; phones, other computers, proxies, port forwarding, WSL, Docker, Dev Containers, and Remote SSH are unsupported.
+`browserAccess` defaults to `same-machine`, so a Vite project can use a local network-interface IP on the same computer without an explicit plugin option. Source Inspector does not modify `server.host`; the project-owned Vite setting must already allow that interface. The actual listener port and Origin must match exactly, and network changes require a Dev Server restart. Configure `webSourceInspector({ browserAccess: 'loopback' })` to limit browser access to loopback addresses. The IDE Bridge always binds only to `127.0.0.1`. `remoteBrowser` is deprecated and only accepts `false`; phones, other computers, proxies, port forwarding, WSL, Docker, Dev Containers, and Remote SSH are unsupported.
 
 The same workflow is available through the companion extension. Open a trusted local workspace, run **Source Inspector: Enable Project**, review the diff, confirm the plan, and then continue using the project's existing `dev` or `serve` command. In a monorepo, choose the actual Vue application when prompted.
 

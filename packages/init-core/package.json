@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@web-source-inspector/compiler-core": "workspace:*",
     "@babel/parser": "7.28.4",
     "recast": "0.23.11",
     "semver": "7.7.2"

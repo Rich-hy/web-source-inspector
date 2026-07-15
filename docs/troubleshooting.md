@@ -2,18 +2,22 @@
 
 先运行 `Source Inspector: Show Diagnostics` 获取脱敏状态。诊断只应包含版本、信任状态、连接状态、session 短 ID、root/tab 数和错误码。
 
+## Doctor 与移除
+
+`npx web-source-inspector doctor` 只检查目标项目本地 npm 包、兼容性 tuple、接入配置和可恢复状态，不会写入配置。`npx web-source-inspector remove` 只移除 Inspector 拥有且未被人工修改的接入节点；历史 state 即使不再满足当前接入范围，仍可用于安全卸载。
+
 ## 浏览器没有 Inspector 按钮
 
 按顺序检查：
 
 1. 当前运行的是 Vite/Webpack/Vue CLI 开发服务器，不是 preview 或生产构建。
-2. 已执行 `npx web-source-inspector init` 或扩展的 **Enable Project**，且配置文件中存在公开包接入。
+2. 目标项目已本地安装 `web-source-inspector` 开发依赖，并已执行 `npx web-source-inspector init` 或扩展的 **Enable Project**，且配置文件中存在公开包接入。扩展不会自动安装 npm 包，也没有仅安装插件、零项目接入路径。
 3. 当前开发命令实际加载了被修改的配置；可运行 `npx web-source-inspector doctor` 检查。
 4. `ui` 没有设为 `false`，`enabled` 没有设为 `false`。
 5. 项目本地能解析 `web-source-inspector` 及对应 `/vite` 或 `/webpack` 子路径。
 6. 浏览器控制台和 Dev Server 输出是否有 runtime、loader、middleware 或 transport 诊断。
 
-生产页面没有按钮是正确行为。
+Vite 的 build、preview、`enabled: false` 和 Webpack 非 `development` 场景没有按钮是正确行为。
 
 ## 按钮存在但 DOM 没有 marker
 
@@ -41,7 +45,7 @@
 
 检查：
 
-1. 业务项目已安装最新的本地 npm 包，并重新执行过 `npx web-source-inspector init`。
+1. 业务项目已安装 `web-source-inspector` 本地开发依赖，并重新执行过 `npx web-source-inspector init`；扩展只调用该工作区 CLI，不会替项目安装或更新 npm 包。
 2. 初始化器修改配置后，已完整重启原来的 `dev`/`serve` 进程；只刷新浏览器不足以重新加载构建配置。
 3. Vue CLI 3 / Webpack Dev Server 3 的自动 hook 使用 `before(app, server)`，并把 `server.compiler` 传给 `createWebSourceInspectorBrowserMiddleware`。Vue CLI 3 不会提供可靠的第三个 `compiler` 参数。
 4. VSIX 已安装并 reload。
@@ -68,12 +72,13 @@ session 默认目录见 [安全模型](security.md#session-文件)。Windows 默
 | `WORKSPACE_NOT_MATCHED` | IDE workspace 与 session canonical root 无交集 |
 | `BROWSER_SAME_MACHINE_REJECTED` | socket 地址不在启动时的本机网卡快照中；确认同一电脑访问并完整重启 Dev Server |
 | `BROWSER_ORIGIN_REJECTED` | Origin 的协议、实际端口、allowlist 或字面量 IP 与 socket 地址不一致 |
+| `RAW_WATCH_HTTPS_UNSUPPORTED` | raw Webpack watch 只支持精确 HTTP Origin；改用 HTTP，或使用受支持的 Webpack Dev Server 传输 |
 
 认证/协议错误属于 fatal rejection，不应无限重试。不要手工修改 token 或把它复制到 URL。
 
 ## 本机网卡 IP 访问被拒绝
 
-Vite 默认 `browserAccess` 是 `same-machine`。同一台电脑通过网卡 IP 访问时，确认 `server.host` 是 `0.0.0.0`、`::` 或精确本机 IP，并确认没有显式配置 `browserAccess: 'loopback'`。页面的 Origin 必须使用 Dev Server 实际监听端口，不能用配置中已经回退的端口。网卡、VPN 或虚拟接口变化后重启 Dev Server。不要用 `remoteBrowser: true`、代理 header、端口转发或放开 Bridge 监听地址解决问题；它们不受支持。
+Vite 默认 `browserAccess` 是 `same-machine`，只放行同一台电脑的回环地址或启动时快照中的网卡 IP。插件不会改写 `server.host`；通过网卡 IP 访问时，确认项目配置中的 `server.host` 是 `0.0.0.0`、`::` 或精确本机 IP，并确认没有显式配置 `browserAccess: 'loopback'`。页面 Origin 必须使用 Dev Server 实际监听端口以及相同的字面量 IP、协议，不能用配置中已经回退的端口。网卡、VPN 或虚拟接口变化后重启 Dev Server。不要用 `remoteBrowser: true`、代理 header、端口转发或放开 Bridge 监听地址解决问题；它们不受支持。
 
 ## 开启选择模式后点击没有打开源码
 
@@ -147,7 +152,7 @@ Vite 默认 `browserAccess` 是 `same-machine`。同一台电脑通过网卡 IP 
 
 ## Remote 环境不可用
 
-首版主动拒绝 WSL、Remote SSH、Dev Container 和 Codespaces。这不是端口配置问题；Extension Host、临时目录、loopback 和源码文件可能不在同一台机器。
+首版主动拒绝 WSL、Docker、Remote SSH、Dev Container 和 Codespaces，也不支持手机或其它机器上的浏览器。这不是端口配置问题；Extension Host、临时目录、loopback 和源码文件可能不在同一台机器。
 
 不要把 Bridge 改为监听 `0.0.0.0`。需要 Remote 支持时，应单独设计远端 workspace extension 和受控端口转发。
 
@@ -156,7 +161,7 @@ Vite 默认 `browserAccess` 是 `same-machine`。同一台电脑通过网卡 IP 
 立即阻断发布：
 
 1. 确认使用的是生产 build，不是 dev/preview 指向 dev 产物。
-2. 检查 Vite Adapter 的 serve lifecycle，以及 Webpack Adapter 的 development/no-op 判断没有被绕过。
+2. 检查 Vite Adapter 的 serve lifecycle、build/preview/`enabled: false` no-op，以及 Webpack Adapter 的非 `development` no-op 判断没有被绕过。
 3. 搜索业务入口是否直接 import Runtime。
 4. 搜索产物中的两个 `data-wsi-*` marker、`wsi:browser:`、virtual client 和 Bridge 字符串。
 5. 检查构建插件是否被二次包装并绕过 command。

@@ -1,4 +1,4 @@
-import { relativePathFromRoot, createSourceDigest } from '@web-source-inspector/compiler-core';
+import { createSourceDigest } from '@web-source-inspector/compiler-core';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
@@ -19,6 +19,10 @@ import {
 } from './constants.js';
 import { WebpackAdapterError } from './errors.js';
 import { getWebpackAdapterSession } from './registry.js';
+import {
+  classifyWebpackSource,
+  type CanonicalSourceClassification,
+} from './source-boundary.js';
 import { createTemplateSourceMap } from './template-source-map.js';
 import { createWebpackRuntimeClientSource } from './runtime-entry.js';
 import {
@@ -51,47 +55,52 @@ export default function webSourceInspectorWebpackLoader(
     clearBuildMetadata(this._module);
     return passThrough(this, source, incomingSourceMap, additionalData);
   }
-  const rawRuntimeOptions = readRawRuntimePlaceholder(this);
-  if (rawRuntimeOptions) {
-    if (
-      !session ||
-      session.disposed ||
-      !session.rawCredential ||
-      rawRuntimeOptions.sessionId !== session.compilerSessionId ||
-      rawRuntimeOptions.sessionEpoch !== session.sessionEpoch ||
-      typeof rawRuntimeOptions.runtimeModuleRequest !== 'string' ||
-      rawRuntimeOptions.runtimeModuleRequest.length === 0
-    ) {
-      throw pipelineError('raw Runtime placeholder 与活动 Plugin session 不一致');
+  if (!templateQuery) {
+    const rawRuntimeOptions = readRawRuntimePlaceholder(this);
+    if (rawRuntimeOptions) {
+      if (
+        !session ||
+        session.disposed ||
+        !session.rawCredential ||
+        rawRuntimeOptions.sessionId !== session.compilerSessionId ||
+        rawRuntimeOptions.sessionEpoch !== session.sessionEpoch ||
+        typeof rawRuntimeOptions.runtimeModuleRequest !== 'string' ||
+        rawRuntimeOptions.runtimeModuleRequest.length === 0
+      ) {
+        throw pipelineError('raw Runtime placeholder 与活动 Plugin session 不一致');
+      }
+      contextDisableCache(this);
+      if (!session.rawServer) {
+        return 'export {};';
+      }
+      return createWebpackRuntimeClientSource({
+        sessionId: session.compilerSessionId,
+        sessionEpoch: session.sessionEpoch,
+        browserToken: session.rawCredential.browserToken,
+        runtimeModuleRequest: rawRuntimeOptions.runtimeModuleRequest,
+        transport: {
+          kind: 'raw',
+          port: session.rawServer.port,
+          path: session.rawCredential.basePath,
+        },
+      });
     }
-    contextDisableCache(this);
-    if (!session.rawServer) {
-      return 'export {};';
+    const runtimeOptions = readRuntimeBootstrapOptions(this);
+    if (runtimeOptions) {
+      if (!session || session.disposed || !session.browserCredential) {
+        throw pipelineError('Runtime entry 缺少活动 development browser session');
+      }
+      assertRuntimeBootstrapOptions(runtimeOptions, session);
+      return createWebpackRuntimeClientSource(runtimeOptions);
     }
-    return createWebpackRuntimeClientSource({
-      sessionId: session.compilerSessionId,
-      sessionEpoch: session.sessionEpoch,
-      browserToken: session.rawCredential.browserToken,
-      runtimeModuleRequest: rawRuntimeOptions.runtimeModuleRequest,
-      transport: {
-        kind: 'raw',
-        port: session.rawServer.port,
-        path: session.rawCredential.basePath,
-      },
-    });
-  }
-  const runtimeOptions = readRuntimeBootstrapOptions(this);
-  if (runtimeOptions) {
-    if (!session || session.disposed || !session.browserCredential) {
-      throw pipelineError('Runtime entry 缺少活动 development browser session');
-    }
-    assertRuntimeBootstrapOptions(runtimeOptions, session);
-    return createWebpackRuntimeClientSource(runtimeOptions);
+    clearBuildMetadata(this._module);
+    return passThrough(this, source, incomingSourceMap, additionalData);
   }
   if (!session || session.disposed) {
     return passThrough(this, source, incomingSourceMap, additionalData);
   }
-  if (!templateQuery) {
+  const sourceClassification = classifyWebpackSource(session.sourceBoundary, this.resourcePath);
+  if (sourceClassification.kind !== 'inspectable') {
     clearBuildMetadata(this._module);
     return passThrough(this, source, incomingSourceMap, additionalData);
   }
@@ -103,7 +112,15 @@ export default function webSourceInspectorWebpackLoader(
       'WSI template Loader 必须运行在 Webpack async loader 上下文',
     );
   }
-  transformTemplate(this, session, source, incomingSourceMap, additionalData, callback);
+  transformTemplate(
+    this,
+    session,
+    sourceClassification,
+    source,
+    incomingSourceMap,
+    additionalData,
+    callback,
+  );
 }
 
 interface RawRuntimePlaceholderOptions {
@@ -206,6 +223,7 @@ function assertRuntimeBootstrapOptions(
 async function transformTemplate(
   context: WebpackLoaderContextLike,
   session: WebpackAdapterSession,
+  sourceClassification: Extract<CanonicalSourceClassification, { kind: 'inspectable' }>,
   source: string | Buffer,
   incomingSourceMap: unknown,
   additionalData: unknown,
@@ -215,7 +233,7 @@ async function transformTemplate(
     assertLoaderIdentity(readLoaderIdentity(context), session.loaderIdentity);
     const fullSource = await readFullSfc(context, session);
     const compiler = getVueCompiler(session);
-    const parsedSfc = compiler.parseSfc(fullSource, context.resourcePath);
+    const parsedSfc = compiler.parseSfc(fullSource, sourceClassification.canonicalPath);
     if (parsedSfc.errors.length > 0 || parsedSfc.template === null) {
       throw pipelineError('无法从完整 SFC 确认 template block');
     }
@@ -236,13 +254,13 @@ async function transformTemplate(
       session.loaderIdentity.loaderPath,
     );
 
-    const relativePath = relativePathFromRoot(session.root, context.resourcePath);
+    const relativePath = sourceClassification.relativePath;
     const moduleId = relativePath;
     const fullDigest = createSourceDigest(fullSource);
     const generation = session.manifest.allocateGeneration(moduleId, fullDigest);
     const result = transformVueSfc({
       source: fullSource,
-      filename: context.resourcePath,
+      filename: sourceClassification.canonicalPath,
       rootKey: session.rootKey,
       relativePath,
       moduleId,
@@ -260,7 +278,7 @@ async function transformTemplate(
     if (errorDiagnostic) {
       throw pipelineError(`${errorDiagnostic.code}:${errorDiagnostic.message}`);
     }
-    const transformedSfc = compiler.parseSfc(result.code, context.resourcePath);
+    const transformedSfc = compiler.parseSfc(result.code, sourceClassification.canonicalPath);
     if (transformedSfc.errors.length > 0 || transformedSfc.template === null) {
       throw pipelineError('无法从 Transform 结果恢复 template block');
     }
@@ -391,7 +409,7 @@ function getVueCompiler(session: WebpackAdapterSession): VueCompilerAdapter {
     return existing;
   }
   const compiler = resolveVueCompilerAdapter({
-    projectRoot: session.root,
+      projectRoot: session.projectRoot,
     vueVersion: session.vueVersion,
   });
   resolvedCompilers.set(session, compiler);

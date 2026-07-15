@@ -16,6 +16,10 @@ export interface WebpackAstOptions {
   moduleKind: ConfigModuleKind;
   webpackDevServerMajor?: 3 | 4;
   allowedOrigin?: string;
+  /** 自动改写前必须证明配置在 development 模式运行。 */
+  requireStaticSafety?: boolean;
+  /** Vue CLI serve 调用链已经证明 development 时使用。 */
+  provenDevelopmentMode?: boolean;
 }
 
 export interface WebpackAstTransformResult {
@@ -249,6 +253,73 @@ function propertyArray(
     return initializer?.type === 'ArrayExpression' ? initializer : undefined;
   }
   return undefined;
+}
+
+function propertyValue(object: AstNode, name: string): AstNode | undefined {
+  return findProperty(object, name)?.value as AstNode | undefined;
+}
+
+function isStaticString(node: unknown): boolean {
+  return isStringLiteral(node);
+}
+
+function isStaticStringArray(node: unknown): boolean {
+  const candidate = node as AstNode | undefined;
+  return candidate?.type === 'ArrayExpression'
+    && ((candidate.elements as unknown[] | undefined) ?? []).every((element) =>
+      element !== null
+      && (element as AstNode | undefined)?.type !== 'SpreadElement'
+      && isStaticString(element));
+}
+
+function isStaticEntryDescriptor(
+  node: AstNode,
+  body: AstNode[],
+  seen: Set<string>,
+): boolean {
+  if (node.type !== 'ObjectExpression') {
+    return false;
+  }
+  const properties = objectProperties(node);
+  if (!properties) {
+    return false;
+  }
+  const importProperty = findProperty(node, 'import');
+  if (!importProperty) {
+    return false;
+  }
+  return isStaticEntryValue(importProperty.value as AstNode | undefined, body, seen);
+}
+
+function isStaticEntryValue(
+  node: AstNode | undefined,
+  body: AstNode[],
+  seen = new Set<string>(),
+): boolean {
+  if (!node) {
+    return false;
+  }
+  if (isStaticString(node) || isStaticStringArray(node)) {
+    return true;
+  }
+  if (node.type === 'ObjectExpression') {
+    return isStaticEntryDescriptor(node, body, seen);
+  }
+  if (!isIdentifier(node) || seen.has(node.name)) {
+    return false;
+  }
+  seen.add(node.name);
+  return isStaticEntryValue(findVariableInitializer(body, node.name), body, seen);
+}
+
+function hasStaticDevelopmentMode(
+  config: AstNode,
+  provenDevelopmentMode: boolean | undefined,
+): boolean {
+  if (provenDevelopmentMode) {
+    return true;
+  }
+  return isStringLiteral(propertyValue(config, 'mode'), 'development');
 }
 
 function topLevelBindings(body: AstNode[]): Set<string> {
@@ -1004,6 +1075,15 @@ export function transformWebpackConfig(
     return { ok: false, code: source, operations: [], errorCode: 'MULTI_COMPILER_UNSUPPORTED' };
   }
   const config = unwrapObject(exported, body);
+  if (config && options.requireStaticSafety
+    && !hasStaticDevelopmentMode(config, options.provenDevelopmentMode)) {
+    return { ok: false, code: source, operations: [], errorCode: 'WEBPACK_DEVELOPMENT_MODE_REQUIRED' };
+  }
+  const entry = config ? propertyValue(config, 'entry') : undefined;
+  if (config && options.requireStaticSafety && entry !== undefined
+    && !isStaticEntryValue(entry, body)) {
+    return { ok: false, code: source, operations: [], errorCode: 'DYNAMIC_ENTRY_UNSUPPORTED' };
+  }
   const moduleObject = config ? propertyObject(config, body, 'module') : undefined;
   const rules = moduleObject ? propertyArray(moduleObject, body, 'rules') : undefined;
   const plugins = config ? propertyArray(config, body, 'plugins') : undefined;

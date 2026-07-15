@@ -15,7 +15,9 @@ export type {
   ProjectDiagnostic,
   ProjectDiagnosticSeverity,
   ProjectProfile,
+  ProjectTransport,
   RequiredInput,
+  VueFamily,
 } from './types';
 export type {
   AstOperation,

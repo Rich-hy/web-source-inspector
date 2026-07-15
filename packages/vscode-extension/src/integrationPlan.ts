@@ -137,11 +137,11 @@ async function askQuestion(question: IntegrationQuestion): Promise<string | unde
       validateInput(value) {
         try {
           const url = new URL(value);
-          return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === value
+          return url.protocol === 'http:' && url.origin === value
             ? undefined
-            : '请输入不带路径的精确 HTTP(S) Origin。';
+            : '请输入不带路径的精确 HTTP Origin。';
         } catch {
-          return '请输入有效的 HTTP(S) Origin。';
+          return '请输入有效的 HTTP Origin。';
         }
       },
     });

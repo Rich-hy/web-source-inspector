@@ -1,20 +1,62 @@
+import { detectProject } from '../detect/project';
 import { captureTarget, resolveWorkspaceContext } from '../filesystem/identity';
+import { createRemovalPlanUnlocked } from '../plan/removal';
+import type { DoctorProjectOptions, DoctorResult } from '../plan/types';
 import { readIntegrationState } from '../state/io';
-import { INTEGRATION_STATE_PATH } from '../state/types';
+import { INTEGRATION_STATE_PATH, type IntegrationState } from '../state/types';
 import {
   recoverPendingTransaction,
   TransactionConflictError,
 } from '../transaction/journal';
 import { ProjectLockError, withProjectLock } from '../transaction/runtime';
 import type { ProjectDiagnostic } from '../types';
-import { createRemovalPlanUnlocked } from '../plan/removal';
-import type { DoctorProjectOptions, DoctorResult } from '../plan/types';
 
 function problem(
   code: string,
   message: string,
 ): ProjectDiagnostic {
   return { code, message, severity: 'error', blocking: true };
+}
+
+function answersFromState(state: IntegrationState | undefined): Record<string, string> {
+  if (!state) {
+    return {};
+  }
+  const answers: Record<string, string> = {};
+  if (state.profile.bundler === 'vite'
+    || state.profile.bundler === 'webpack'
+    || state.profile.bundler === 'vue-cli') {
+    answers.bundler = state.profile.bundler;
+  }
+  if (state.profile.bundler !== 'webpack') {
+    return answers;
+  }
+  const rawPlugin = state.nodes.find((node) =>
+    node.details?.browserTransport === 'raw');
+  if (rawPlugin) {
+    answers.transport = 'raw-watch';
+    const origin = rawPlugin.details?.allowedOrigin;
+    if (typeof origin === 'string') {
+      answers.allowedOrigin = origin;
+    }
+    return answers;
+  }
+  if (state.nodes.some((node) => node.kind === 'transport-hook')) {
+    answers.transport = 'wds';
+  }
+  return answers;
+}
+
+function compatibilityErrorCode(
+  requiredInputCount: number,
+  diagnostics: readonly ProjectDiagnostic[],
+): 'PLAN_CONTEXT_REQUIRED' | 'TARGET_UNSUPPORTED' | undefined {
+  if (requiredInputCount > 0) {
+    return 'PLAN_CONTEXT_REQUIRED';
+  }
+  return diagnostics.some((item) => item.blocking)
+    ? 'TARGET_UNSUPPORTED'
+    : undefined;
 }
 
 export function doctorProject(options: DoctorProjectOptions): DoctorResult {
@@ -49,43 +91,74 @@ export function doctorProject(options: DoctorProjectOptions): DoctorResult {
       }
 
       const stateTarget = captureTarget(context, INTEGRATION_STATE_PATH);
-      if (!stateTarget.identity.exists) {
-        return {
-          ok: true,
-          recovered,
-          configured: false,
-          diagnostics: [],
-        };
+      let state: IntegrationState | undefined;
+      if (stateTarget.identity.exists) {
+        try {
+          state = readIntegrationState(stateTarget) ?? undefined;
+        } catch (error) {
+          return {
+            ok: false,
+            recovered,
+            configured: true,
+            diagnostics: [problem(
+              'TRANSACTION_CONFLICT',
+              error instanceof Error ? error.message : 'integration state 无效。',
+            )],
+            errorCode: 'TRANSACTION_CONFLICT',
+          };
+        }
       }
+
+      let profile;
       try {
-        readIntegrationState(stateTarget);
-      } catch (error) {
+        profile = detectProject({
+          workspaceRoot: context.rootPath,
+          answers: answersFromState(state),
+        });
+      } catch {
         return {
           ok: false,
           recovered,
-          configured: true,
-          diagnostics: [problem(
-            'TRANSACTION_CONFLICT',
-            error instanceof Error ? error.message : 'integration state 无效。',
-          )],
-          errorCode: 'TRANSACTION_CONFLICT',
+          configured: Boolean(state),
+          diagnostics: [problem('INTERNAL_ERROR', '当前项目工具链无法安全检测。')],
+          errorCode: 'INTERNAL_ERROR',
         };
       }
-      const removalPlan = createRemovalPlanUnlocked(options, context, runtime);
-      if (removalPlan.blocked) {
+
+      const diagnostics = [...profile.diagnostics];
+      if (state) {
+        // 卸载所有权只依赖历史 state，不受当前工具链兼容性结果阻断。
+        const removalPlan = createRemovalPlanUnlocked(options, context, runtime);
+        diagnostics.push(...removalPlan.diagnostics);
+        if (removalPlan.blocked) {
+          return {
+            ok: false,
+            recovered,
+            configured: true,
+            diagnostics,
+            errorCode: 'TRANSACTION_CONFLICT',
+          };
+        }
+      }
+
+      const compatibilityError = compatibilityErrorCode(
+        profile.requiredInputs.length,
+        profile.diagnostics,
+      );
+      if (compatibilityError) {
         return {
           ok: false,
           recovered,
-          configured: true,
-          diagnostics: removalPlan.diagnostics,
-          errorCode: 'TRANSACTION_CONFLICT',
+          configured: Boolean(state),
+          diagnostics,
+          errorCode: compatibilityError,
         };
       }
       return {
         ok: true,
         recovered,
-        configured: true,
-        diagnostics: [],
+        configured: Boolean(state),
+        diagnostics,
       };
     });
   } catch (error) {
