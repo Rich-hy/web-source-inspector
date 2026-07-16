@@ -2,6 +2,42 @@
 
 Web Source Inspector connects a local Vue development page to VS Code or Cursor and opens the original `.vue` template range for a selected element. This package contains the project-local CLI and the Vite, Webpack, and Vue CLI integration entry points.
 
+> ⚠️ **Important**: This tool requires **BOTH** the npm package **AND** the VS Code/Cursor extension to work together. Installing only the npm package is not enough.
+
+## Quick Start
+
+### Step 1: Install npm package
+
+```sh
+npm install --save-dev web-source-inspector@0.1.0-beta.3
+```
+
+### Step 2: Install VS Code/Cursor extension
+
+The VS Code extension is **required** for this tool to work. Without it, the inspector cannot open files in your editor.
+
+1. Download `web-source-inspector.vsix` from [GitHub Releases](https://github.com/Rich-hy/web-source-inspector/releases)
+2. Open VS Code or Cursor
+3. Go to Extensions view (`Ctrl+Shift+X` or `Cmd+Shift+X`)
+4. Click the `⋯` (three dots) menu → **Install from VSIX...**
+5. Select the downloaded `.vsix` file
+
+### Step 3: Enable in your project
+
+```sh
+npx web-source-inspector init
+```
+
+Or use the VS Code Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
+- Run: **Source Inspector: Enable Project**
+
+### Step 4: Start using
+
+1. Start your dev server (`npm run dev` or `npm run serve`)
+2. Open your app in the browser
+3. Click the floating inspector button (bottom-right) or press `Alt+Shift+C`
+4. Click any element to open its source in VS Code/Cursor
+
 ## Requirements and compatibility
 
 - Consumer projects: Node.js `>=16.20.2`.
@@ -25,6 +61,8 @@ An accepted project must satisfy more than these top-level ranges. The installed
 Raw Webpack watch mode accepts only an exact `http:` browser Origin. An `https:` Origin is unsupported and rejected.
 
 ## Install and manage integration
+
+Before running `init`, make sure you have installed the VS Code/Cursor extension from [GitHub Releases](https://github.com/Rich-hy/web-source-inspector/releases).
 
 Install the current npm baseline as a development dependency in the Vue project:
 
