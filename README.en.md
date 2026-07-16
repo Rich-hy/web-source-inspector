@@ -1,216 +1,325 @@
 # Web Source Inspector
 
-[简体中文](README.md) | **English**
+> [简体中文](README.md) | English
 
-> **Current baseline:** npm `web-source-inspector@0.1.0-beta.3`; manually installed VSIX `web-source-inspector-vscode@0.1.1`. They are separate distribution artifacts; installable versions, runtime tuple compatibility, and real-editor validation are separate conclusions. See the [capability matrix](docs/capabilities.md) for the evidence.
+**Instantly locate Vue component source code from browser elements**
 
-Web Source Inspector maps an element in a Vue development page back to its original .vue template range in VS Code or Cursor. It works through project-side Vite or Webpack/Vue CLI integration, rather than attempting to guess source locations from the final DOM.
+Click any element in your browser and automatically open the corresponding `.vue` file in VS Code or Cursor, jumping to the exact line. Supports Vite, Webpack, and Vue CLI projects.
 
-The system combines a Vue SFC transform, a browser inspector, an in-memory development-server manifest, a local authenticated Bridge, and an IDE extension. The browser only submits an opaque source ID with browser-transport authentication and session metadata; it never receives source paths, source ranges, or IDE Bridge credentials.
+![Version](https://img.shields.io/badge/npm-0.1.0--beta.3-blue)
+![VS Code Extension](https://img.shields.io/badge/vsix-0.1.1-green)
 
-## Highlights
+---
 
-- Maps ordinary DOM nodes, component call sites, loops, conditional branches, Slots, Fragments, dynamic components, and Teleport output to trusted Vue template candidates.
-- Provides a development-only floating inspector, hover highlighting, Shadow DOM isolation, keyboard shortcuts, and selection-mode event interception.
-- Supports a one-time, ownership-aware project setup through the project-local CLI or the VS Code/Cursor extension. The extension invokes the workspace CLI, previews the plan and diff, and writes configuration only after user confirmation.
-- Preserves existing development commands and only changes recognized static Vite, Webpack, or Vue CLI configuration shapes.
-- Keeps HMR generations and stale source-ID tombstones in memory so an outdated ID is not guessed onto a new file or range.
-- Uses a loopback-only, authenticated IDE Bridge and revalidates workspace containment before an editor opens a file.
+## Quick Start
 
-## Scope and compatibility
+### Requirements
 
-The installable peer ranges are Vue 2.6 (>=2.6.0 <2.7.0), Vue 2.7 (>=2.7.0 <2.8.0), and Vue 3 (>=3.2.0 <4.0.0), with Vite >=2.9.0 <7.0.0, Webpack >=4 <6, or Vue CLI 3-5 in supported standard configuration shapes. At runtime, the actual Vue compiler, bundler plugin or loader, Webpack Dev Server, and raw transport must also form a compatible upstream-peer tuple. Official vue-loader 15/16/17 releases do not declare a Vue peer; Vue family is determined by the actual full version in `vue/package.json`. On Webpack/Vue CLI paths, vue-loader's major version must match that Vue family and its Webpack peer must match; Vite does not depend on vue-loader. Compiler evidence is family-specific: for Vue 2.6, `vue-template-compiler` must exactly match the actual full Vue version; for Vue 2.7, `vue/compiler-sfc` must resolve from the actual `vue` package anchor; for Vue 3, both `@vue/compiler-sfc` and `@vue/compiler-dom` must exist and each must exactly match the actual full Vue version. The package-manager contract supports npm, pnpm, and Yarn in node_modules mode; detect/doctor rejects Bun and Yarn PnP. This contract is separate from real npm/Yarn fixture or E2E evidence, which remains listed independently in the [capability matrix](docs/capabilities.md). An installable range is not evidence that every tuple is compatible or verified.
+- **Node.js** ≥ 16.20.2
+- **Vue** 2.6 / 2.7 / 3.2+
+- **Build Tool**: Vite 2.9+ or Webpack 4/5 (including Vue CLI)
+- **Editor**: VS Code ≥ 1.90 or Cursor
 
-These version ranges are implementation scope, not a claim that every version combination has end-to-end release evidence. The current automated browser evidence covers:
+> ⚠️ Browser, development server, and IDE must be on the same machine
 
-| Environment | Current evidence |
-| --- | --- |
-| Vue 3.5.39 + Vite 6.4.3 + @vitejs/plugin-vue 5.2.4 | Seven browser E2E cases cover the inspector UI, markers, event isolation, v-for IDs, Teleport, component-call-site selection, and privacy of tooltip/protocol data; focused policy tests cover same-machine authorization. |
-| Vue 3.5.29 + Vite 6.4.1 + @vitejs/plugin-vue 5.2.4 | `threejs-editor` verified Runtime, markers, and Cursor acknowledgements on localhost, 127.0.0.1, and local `192.168.8.155`; rejection from another device remains untested. |
-| Vue 3.5.39 + Webpack 5.108.4 + vue-loader 17.4.2 + webpack-dev-server 4.15.2 | One browser E2E case covers the Loader, Runtime, Webpack Dev Server stream/hello flow, and metadata request. |
-| Vue 2.7.16 + Vue CLI 3.12.1 + Webpack 4.47.0 + vue-loader 15.11.1 | A local project has started and restarted successfully; the packaged VSIX was installed in Cursor and connected to its local Bridge. Browser-click-to-file-open verification is still pending. |
+---
 
-See the [capability and verification matrix](docs/capabilities.md) for exact behavior, remaining gaps, and the distinction between implemented functionality, automated coverage, and real editor verification.
+## Installation (3 Steps)
 
-### Out of scope for the first release
+### Step 1: Install npm Package
 
-- React, Svelte, SSR/hydration, independent Rollup integration, Pug, MDX, and external Vue template files.
-- Canvas or Three.js object-level selection. The surrounding canvas DOM element can be selected, but a separate adapter is required for rendered objects.
-- Browsers on other devices, WSL, Remote SSH, Dev Containers, Codespaces, and any workflow where the browser, development server, extension host, and source workspace are not on the same machine.
-- Opening files outside the trusted local workspace.
-- Transforming third-party component templates by default. When possible, selection falls back to the component call site in user code.
+Run in your Vue project root directory:
 
-## Requirements
+```bash
+npm install -D web-source-inspector
+```
 
-- Consumer project: Node.js 16.20.2 or later.
-- Repository development: Node.js 20.19.0 or later and pnpm 10 or later.
-- Vue 2.6 (>=2.6.0 <2.7.0), Vue 2.7 (>=2.7.0 <2.8.0), or Vue 3 (>=3.2.0 <4.0.0) with a supported bundler configuration.
-- Package manager: npm, pnpm, or Yarn in node_modules mode. Bun and Yarn PnP are rejected by detect/doctor.
-- VS Code 1.90 or later, or a Cursor build compatible with the same stable Extension API.
-- The browser, development server, IDE Extension Host, and source workspace must run on the same local machine.
+Or use other package managers:
 
-## Quick start
+```bash
+# pnpm
+pnpm add -D web-source-inspector
 
-Install the public package from the registry in the target Vue project as a development dependency:
+# yarn
+yarn add -D web-source-inspector
+```
 
-~~~powershell
-npm install --save-dev web-source-inspector
-~~~
+### Step 2: Install VS Code/Cursor Extension
 
-For pre-release validation of a local package artifact only, build it from this repository:
+1. Go to [GitHub Releases](https://github.com/Rich-hy/web-source-inspector/releases/latest)
+2. Download `web-source-inspector.vsix` file
+3. In VS Code or Cursor:
+   - Open Extensions panel (`Ctrl+Shift+X` / `Cmd+Shift+X`)
+   - Click `...` menu in the top right corner
+   - Select **"Install from VSIX..."**
+   - Choose the downloaded `.vsix` file
 
-~~~powershell
-pnpm install
-pnpm package:npm
-~~~
+### Step 3: Enable for Your Project
 
-Then install the generated `web-source-inspector-0.1.0-beta.3.tgz` in place of the registry package as the target project's development dependency. The local tarball is not the normal installation path.
+Open your Vue project and choose either method:
 
-### Option 1: enable from the terminal
+#### Method 1: Using Command Line
 
-In the target Vue project where `web-source-inspector` is installed, run:
-
-~~~powershell
+```bash
 npx web-source-inspector init
-~~~
+```
 
-The CLI detects the Vue and bundler setup, previews the planned edits, and waits for confirmation before writing. It only updates supported static configuration shapes. Dynamic or ambiguous configurations receive diagnostics instead of guessed rewrites.
+#### Method 2: Using VS Code/Cursor Command
 
-Use the following commands to inspect or safely remove the managed integration later:
+1. Press `Ctrl+Shift+P` / `Cmd+Shift+P` to open command palette
+2. Type and select **"Source Inspector: Enable Project"**
+3. Review the configuration preview and confirm
 
-~~~powershell
+> 💡 The tool automatically detects your build tool (Vite/Webpack/Vue CLI) and only modifies necessary config files without touching your business code.
+
+---
+
+## Usage
+
+### 1. Start Development Server
+
+Launch your project as usual:
+
+```bash
+npm run dev
+# or
+npm run serve
+```
+
+### 2. Open Browser
+
+Visit your development server (e.g., `http://localhost:5173`). An Inspector button will appear in the bottom-right corner.
+
+### 3. Select Element
+
+**Method 1: Click Button**
+- Click the Inspector button in the bottom-right corner
+- Hover over target element (it will be highlighted)
+- Click the element
+
+**Method 2: Keyboard Shortcut**
+- Press `Alt+Shift+C` to enter selection mode
+- Hover and click target element
+
+### 4. Source Opens Automatically
+
+VS Code/Cursor will automatically open the corresponding `.vue` file and navigate to the exact location in the template.
+
+### Keyboard Shortcuts
+
+| Action | Description |
+|--------|-------------|
+| `Esc` | Exit selection mode |
+| `Click` | Select element and open source |
+| `Shift + Click` | Prioritize component call site |
+| `Alt + Click` | Prioritize control flow (e.g., `v-if`) |
+
+---
+
+## Verification and Uninstallation
+
+### Check Project Status
+
+```bash
 npx web-source-inspector doctor
+```
+
+This command checks:
+- Dependencies are correctly installed
+- Configuration is properly written
+- Build tool versions are compatible
+
+### Uninstall
+
+To remove project configuration:
+
+```bash
 npx web-source-inspector remove
-~~~
+```
 
-### Option 2: enable from VS Code or Cursor
+Then remove the dependency from `package.json`:
 
-Build the extension VSIX in this repository:
+```bash
+npm uninstall web-source-inspector
+```
 
-~~~powershell
-pnpm package:vsix
-~~~
+---
 
-The resulting file is:
+## Supported Features
 
-~~~text
-packages/vscode-extension/web-source-inspector.vsix
-~~~
+✅ Plain DOM elements, components, `v-for`, `v-if`, Slots, dynamic components, Teleport  
+✅ Element selection and highlighting inside Shadow DOM  
+✅ Same-machine network IP access (Vite projects, requires `server.host` config)  
+✅ Session management for multiple browser tabs and IDE windows  
+✅ Automatic source mapping sync after HMR updates  
 
-In VS Code or Cursor, choose **Install from VSIX...**, select that file, reload when prompted, and open the trusted local Vue workspace. Run **Source Inspector: Enable Project**, review the plan and diff, and confirm the change.
+---
 
-The extension invokes the same project-local CLI logic as the terminal workflow. It does not download packages, use a global CLI, or provide a plugin-only, zero-project-integration path. It changes only supported build configuration after confirmation; it does not modify business source, `index.html`, routes, npm scripts, or the existing dev/serve command.
+## Compatibility
 
-## Use the inspector
+| Type | Supported Versions |
+|------|-------------------|
+| **Vue** | 2.6.x, 2.7.x, 3.2+ |
+| **Vite** | 2.9.0 ~ 6.x |
+| **Webpack** | 4.x, 5.x |
+| **Vue CLI** | 3.x, 4.x, 5.x |
+| **Package Manager** | npm, pnpm, Yarn (node_modules mode) |
 
-1. Open the target project as a trusted local workspace in VS Code or Cursor.
-2. Start the project with its existing development command, such as npm run dev or npm run serve.
-3. Let the extension discover and connect to the matching local development session, or choose one manually.
-4. In the browser, click the Source Inspector button or press Alt+Shift+C.
-5. Hover an element to inspect its candidate, then click it to open the corresponding Vue template range in the connected editor.
+### Not Currently Supported
 
-Press Esc to leave selection mode. A successful selection exits by default because single-shot mode is enabled. Shift+click prefers a component call-site candidate, while Alt+click prefers a nearby control-flow candidate when available. While selection mode is armed, the runtime intercepts the relevant pointer, click, and context-menu events in the capture phase so normal page behavior is not triggered by a source-selection click.
+- ❌ React, Svelte, or other frameworks
+- ❌ Pug/MDX template syntax
+- ❌ SSR (Server-Side Rendering)
+- ❌ WSL, Docker, Remote SSH, Dev Container
+- ❌ Remote browsers on other devices
+- ❌ Yarn PnP, Bun
 
-For advanced Vite options, configuration examples, extension commands, and settings, see the [quick-start guide](docs/quick-start.md).
+---
 
-## Same-machine Vite IP access
+## Troubleshooting
 
-`browserAccess` defaults to `same-machine`, so a Vite page can be opened through loopback or a startup-snapshot local network-interface IP on the same computer. The plugin does not change `server.host`; the project must still allow that interface, such as `0.0.0.0`, `::`, or the exact local IP. The server freezes local interface addresses and the actual listener port at startup; for a non-loopback browser, the socket address and Origin literal IP, protocol, and port must match exactly. Configure `webSourceInspector({ browserAccess: 'loopback' })` to restrict access to loopback addresses. Restart the Dev Server after a network change. The Bridge always listens on `127.0.0.1`; deprecated `remoteBrowser` only accepts `false`, and proxies, forwarding, WSL, Docker, Dev Containers, Remote SSH, phones, and other computers are unsupported.
+### Issue 1: Inspector Button Not Appearing
 
-Raw Webpack watch accepts an exact HTTP Origin only. An HTTPS Origin returns `RAW_WATCH_HTTPS_UNSUPPORTED`; a proxy or port forwarding does not make it supported.
+**Possible causes:**
+- Project configuration not properly written
+- Development server not restarted
 
-## How it works
+**Solution:**
+```bash
+# Check project status
+npx web-source-inspector doctor
 
-~~~text
-Vue SFC
-  -> Vite or Webpack/Vue CLI adapter injects DOM and component markers
-  -> Browser Runtime selects an opaque sourceId
-  -> Development-server in-memory Manifest resolves a trusted relative path and range
-  -> Authenticated Bridge on a random 127.0.0.1 port
-  -> VS Code/Cursor extension revalidates the workspace and opens the source
-~~~
+# If configuration is incorrect, re-enable
+npx web-source-inspector remove
+npx web-source-inspector init
 
-The Inspector is development-only. The Vite adapter creates a session only for a real development server and is a no-op for build, preview, or `enabled: false`; the Webpack adapter is a no-op outside development mode. A production build must not include the Runtime, source markers, browser events, Manifest, or Bridge.
+# Restart development server
+npm run dev
+```
 
-## Workspace packages
+### Issue 2: IDE Doesn't Respond After Clicking Element
 
-| Package | Responsibility |
-| --- | --- |
-| <code>@web-source-inspector/protocol</code> | Protocol versioning, message types, limits, error codes, and runtime validation. |
-| <code>@web-source-inspector/compiler-core</code> | Source IDs, source records, manifests, digests, and candidate ranking. |
-| <code>@web-source-inspector/transform-vue</code> | Vue SFC AST transforms, marker injection, and sourcemaps. |
-| <code>@web-source-inspector/runtime</code> | The browser button, highlighting, selection mode, and HMR transport. |
-| <code>@web-source-inspector/dev-session-core</code> | Bundler-neutral Browser Router, Bridge, and session lifecycle. |
-| <code>@web-source-inspector/vite-plugin</code> | Vite adapter, Runtime injection, and Manifest lifecycle. |
-| <code>@web-source-inspector/adapter-webpack</code> | Webpack/Vue CLI plugin, Loader, and browser transport. |
-| <code>@web-source-inspector/init-core</code> | Project detection, AST plan/apply/remove, doctor, and transaction recovery. |
-| <code>web-source-inspector</code> | The only public npm package, CLI, and Vite/Webpack exports. |
-| <code>web-source-inspector-vscode</code> | VS Code/Cursor extension, project enablement, session discovery, and source opening. |
+**Possible causes:**
+- VS Code/Cursor extension not installed
+- IDE hasn't opened the project workspace
+- Workspace is not trusted
 
-The <code>fixtures/</code> directory contains basic Vite and Webpack Vue applications, an Element Plus fixture, and a monorepo fixture used to exercise integration boundaries.
+**Solution:**
+1. Confirm extension is installed (search "Web Source Inspector" in Extensions panel)
+2. Confirm IDE opened the project as a folder (not a single file)
+3. If prompted about untrusted workspace, choose "Trust this workspace"
 
-## Develop locally
+### Issue 3: Webpack Project Configuration Failed
 
-Repository development requires Node.js 20.19.0 or later and pnpm 10 or later.
+**Possible causes:**
+- Missing `vue-loader`
+- Vue version doesn't match `vue-loader` version
 
-~~~powershell
-pnpm install
-pnpm build
-pnpm dev:basic
-~~~
+**Solution:**
+```bash
+# Check diagnostic information
+npx web-source-inspector doctor
 
-Open the local Vite URL printed by the command. The Inspector button in the lower-right corner lets you check markers, hover behavior, and browser-event isolation. To open a real source file, also package and install the local VSIX:
+# Install missing dependencies as suggested
+npm install -D vue-loader
+```
 
-~~~powershell
-pnpm package:vsix
-~~~
+For more issues, see [Troubleshooting Documentation](docs/troubleshooting.md).
 
-The resulting extension is <code>packages/vscode-extension/web-source-inspector.vsix</code>. In VS Code or Cursor, use **Install from VSIX...**, reload when prompted, and open this repository or another supported local Vue workspace.
+---
 
-## Useful commands
+## Same-Machine Network Access (Vite Projects)
 
-~~~powershell
-pnpm typecheck
-pnpm test
-pnpm test:e2e
-pnpm build
-pnpm package:npm
-pnpm package:vsix
-~~~
+By default, the tool allows access via local IP address (e.g., `http://192.168.1.100:5173`), provided Vite is configured for network access:
 
-Install Chromium before the first Playwright run if it is not already present:
+```js
+// vite.config.js
+export default {
+  server: {
+    host: '0.0.0.0' // or specific local IP
+  }
+}
+```
 
-~~~powershell
-pnpm exec playwright install chromium
-~~~
+To restrict to loopback addresses only (`localhost`/`127.0.0.1`), explicitly specify in plugin configuration:
 
-These commands cover different evidence layers. Automated checks, package smoke checks, and an actual packaged-VSIX installation are not interchangeable; consult the capability matrix before treating a candidate as ready for release.
+```js
+import { webSourceInspector } from 'web-source-inspector/vite'
+
+export default {
+  plugins: [
+    webSourceInspector({
+      browserAccess: 'loopback' // Only allow localhost
+    })
+  ]
+}
+```
+
+> ⚠️ IDE Bridge always listens on `127.0.0.1` only; other devices cannot connect.
+
+---
+
+## Security
+
+- ✅ Browser only sends opaque `sourceId`, no file paths or source code content
+- ✅ IDE Bridge only listens on local loopback address (`127.0.0.1`), inaccessible from external devices
+- ✅ Production builds (`build`/`production` mode) automatically disable all features and inject no code
+- ✅ IDE verifies paths are within workspace before opening files, rejecting external paths
+
+**Pre-release check:** Please follow [Security Documentation](docs/security.md#生产构建核验) to scan production build artifacts for any residual debug code.
+
+If you discover a security issue, please report it privately following [SECURITY.md](SECURITY.md).
+
+---
 
 ## Documentation
 
-The detailed project documentation is currently written in Chinese:
-
-- [Quick start and configuration](docs/quick-start.md)
-- [Architecture and key decisions](docs/architecture.md)
-- [Protocol](docs/protocol.md)
-- [Security model](docs/security.md)
-- [Capabilities and verification matrix](docs/capabilities.md)
-- [Adapter authoring constraints](docs/adapter-authoring.md)
+- [Configuration Options](docs/quick-start.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [Release and VSIX checklist](docs/release.md)
+- [Architecture](docs/architecture.md)
+- [Security Model](docs/security.md)
+- [Capability Matrix](docs/capabilities.md)
 - [Changelog](CHANGELOG.md)
-- [Security reporting](SECURITY.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-## Security and production boundary
+---
 
-- The browser transport carries an opaque source ID rather than a local path or source range. The IDE extension independently validates the workspace root, relative path, and realpath containment before opening a file.
-- The Bridge listens on loopback only and uses authentication and session metadata to keep browser tabs and connected IDEs isolated.
-- Workspace Trust is required. Files outside the trusted workspace are always rejected.
-- Inspectors belong only in development builds. Before distributing a consuming project, follow the [production-build verification guidance](docs/security.md#生产构建核验) and check its real output.
+## Local Development (Contributors)
 
-To report a security issue privately, follow [SECURITY.md](SECURITY.md).
+If you want to contribute or build locally:
+
+```bash
+# Requirements: Node.js >= 20.19.0, pnpm >= 10
+
+# Install dependencies
+pnpm install
+
+# Build all packages
+pnpm build
+
+# Start test project
+pnpm dev:basic
+
+# Package VSIX extension
+pnpm package:vsix
+# Output: packages/vscode-extension/web-source-inspector.vsix
+
+# Run tests
+pnpm test
+pnpm test:e2e
+```
+
+Install Chromium before the first Playwright run if not already present:
+
+```bash
+pnpm exec playwright install chromium
+```
+
+For detailed development guide, see project documentation.
+
+---
 
 ## License
 
-[MIT](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party dependency and distribution information.
+[MIT](LICENSE)
+
+Third-party dependency licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
