@@ -38,7 +38,7 @@ pnpm dev:basic
 npm install -D web-source-inspector
 ```
 
-当前公开基线为 `0.1.0-beta.3`。在仓库根执行 `pnpm package:npm` 产生的 `.tgz` 仅用于本地包验收；扩展不会替项目下载、全局安装或更新 npm 包。
+当前公开基线为 `0.1.0-beta.4`。在仓库根执行 `pnpm package:npm` 产生的 `.tgz` 仅用于本地包验收；扩展不会替项目下载、全局安装或更新 npm 包。
 
 `npm install` 本身不会静默修改项目配置。安装后必须选择一个一次性启用入口，两者使用同一套检测和 AST 修改逻辑。
 

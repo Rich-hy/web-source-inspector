@@ -1,5 +1,5 @@
 export const WEBPACK_ADAPTER_NAME = 'WebSourceInspectorWebpackPlugin';
-export const WEBPACK_ADAPTER_VERSION = '0.1.0-beta.3';
+export const WEBPACK_ADAPTER_VERSION = '0.1.0-beta.4';
 export const WSI_BUILD_METADATA_SCHEMA_VERSION = 1;
 export const WSI_BUILD_METADATA_KEY = '__webSourceInspectorBuildMetadata';
 export const WSI_LOADER_OPTIONS_KEY = '__webSourceInspectorLoaderIdentity';

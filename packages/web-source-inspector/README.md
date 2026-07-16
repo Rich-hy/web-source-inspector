@@ -9,7 +9,7 @@ Web Source Inspector connects a local Vue development page to VS Code or Cursor 
 ### Step 1: Install npm package
 
 ```sh
-npm install --save-dev web-source-inspector@0.1.0-beta.3
+npm install --save-dev web-source-inspector@0.1.0-beta.4
 ```
 
 ### Step 2: Install VS Code/Cursor extension
@@ -67,7 +67,7 @@ Before running `init`, make sure you have installed the VS Code/Cursor extension
 Install the current npm baseline as a development dependency in the Vue project:
 
 ```sh
-npm install --save-dev web-source-inspector@0.1.0-beta.3
+npm install --save-dev web-source-inspector@0.1.0-beta.4
 npx web-source-inspector init
 ```
 

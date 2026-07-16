@@ -11,7 +11,7 @@
 
 `@web-source-inspector/*` workspace 包均为内部私有实现，不单独发布。未来 Three.js、React 或其它框架 adapter 是否拆包，需要在公共 API 稳定后单独评审。
 
-当前发布候选的 npm 产品基线为 `web-source-inspector@0.1.0-beta.3`，对应手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。两者的发布状态彼此独立，且该记录不代表 npm registry、VS Code Marketplace 或 Cursor 的实际发布状态；每次发布前都必须分别查询和记录。
+当前发布候选的 npm 产品基线为 `web-source-inspector@0.1.0-beta.4`，对应手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。两者的发布状态彼此独立，且该记录不代表 npm registry、VS Code Marketplace 或 Cursor 的实际发布状态；每次发布前都必须分别查询和记录。
 
 ## 独立版本与发布
 

@@ -4,7 +4,7 @@ Web Source Inspector 的 Vue/Vite 集成包，连接 SFC transform、Browser Run
 
 ## Status
 
-当前公开 npm 产品基线为 `web-source-inspector@0.1.0-beta.3`；本 workspace 内部 Adapter 不单独发布。Adapter 合同覆盖 Vite 2.9～6 和 Vue 2.6/2.7/3.2+；各真实 Vue/Vite plugin 组合仍需发布矩阵验证。
+当前公开 npm 产品基线为 `web-source-inspector@0.1.0-beta.4`；本 workspace 内部 Adapter 不单独发布。Adapter 合同覆盖 Vite 2.9～6 和 Vue 2.6/2.7/3.2+；各真实 Vue/Vite plugin 组合仍需发布矩阵验证。
 
 当次同机网卡 IP 证据覆盖仓库 Vite `6.4.3` 与消费项目 Vite `6.4.1`；没有第二设备或隔离 VM 的拒绝证据，不声明其它设备已验证拒绝。
 

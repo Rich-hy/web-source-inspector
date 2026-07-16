@@ -2,9 +2,9 @@
 
 本文记录 Web Source Inspector 的用户可见变化。项目遵循 SemVer；npm 与各扩展市场的发布状态需要分别查询确认。
 
-## 0.1.0-beta.3 - 2026-07-15
+## 0.1.0-beta.4 - 2026-07-15
 
-发布单元：npm `web-source-inspector@0.1.0-beta.3`；手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。
+发布单元：npm `web-source-inspector@0.1.0-beta.4`；手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。
 
 ### Changed
 

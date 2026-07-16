@@ -27,7 +27,7 @@ Raw Webpack watch mode accepts only an exact `http:` browser Origin. An `https:`
 
 ## Usage
 
-1. Install the npm package in the Vue project: `npm install -D web-source-inspector@0.1.0-beta.3`.
+1. Install the npm package in the Vue project: `npm install -D web-source-inspector@0.1.0-beta.4`.
 2. Open the trusted local workspace in VS Code or Cursor.
 3. Use the Source Inspector status-bar item or run `Source Inspector: Enable Project`.
 4. In a monorepo, select the nested Vue application. Answer any required bundler or origin prompt.

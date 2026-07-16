@@ -1,6 +1,6 @@
 {
   "name": "web-source-inspector",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "Open Vue template sources from Vite and Webpack development pages in VS Code or Cursor.",
   "keywords": [
     "vue",

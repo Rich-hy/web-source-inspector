@@ -185,4 +185,4 @@ session 描述文件写入当前用户私有的 runtime/cache 目录，采用临
 - Canvas、Three.js 对象需要后续独立 hit-test provider。
 - 真实 VS Code 和 Cursor 安装兼容必须分别 smoke test，不能仅由 API 类型推断。
 
-后续框架或 Canvas adapter 必须遵守 [Adapter 编写约束](adapter-authoring.md)，当前 `0.1.0-beta.3` 尚未提供稳定的通用 Adapter SDK。
+后续框架或 Canvas adapter 必须遵守 [Adapter 编写约束](adapter-authoring.md)，当前 `0.1.0-beta.4` 尚未提供稳定的通用 Adapter SDK。
