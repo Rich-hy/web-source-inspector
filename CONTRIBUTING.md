@@ -1,5 +1,7 @@
 # Contributing to Web Source Inspector
 
+[简体中文](./CONTRIBUTING.zh-CN.md)
+
 Thank you for your interest in contributing to Web Source Inspector! 🎉
 
 ## Ways to Contribute
