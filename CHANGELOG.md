@@ -2,9 +2,18 @@
 
 本文记录 Web Source Inspector 的用户可见变化。项目遵循 SemVer；npm 与各扩展市场的发布状态需要分别查询确认。
 
-## 0.1.0-beta.4 - 2026-07-15
+## 0.1.0-beta.4 - 2026-07-16
 
 发布单元：npm `web-source-inspector@0.1.0-beta.4`；手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。
+
+### Changed
+
+- npm 包 README 新增完整 Quick Start、双组件安装提示和 VSIX 安装步骤，明确 npm 包与 VS Code/Cursor 扩展需要配合使用。
+- npm 包页面补充 GitHub Releases 下载入口，改善首次安装与接入指引。
+
+## 0.1.0-beta.3 - 2026-07-15
+
+发布单元：npm `web-source-inspector@0.1.0-beta.3`；手动安装的 VSIX `web-source-inspector-vscode@0.1.1`。
 
 ### Changed
 

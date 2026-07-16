@@ -6,7 +6,7 @@
 
 在浏览器中点击任意元素，自动在 VS Code 或 Cursor 中打开对应的 `.vue` 文件并跳转到准确行。支持 Vite、Webpack 和 Vue CLI 项目。
 
-![Version](https://img.shields.io/badge/npm-0.1.0--beta.3-blue)
+![Version](https://img.shields.io/badge/npm-0.1.0--beta.4-blue)
 ![VS Code Extension](https://img.shields.io/badge/vsix-0.1.1-green)
 
 ---

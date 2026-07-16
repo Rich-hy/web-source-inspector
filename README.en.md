@@ -6,7 +6,7 @@
 
 Click any element in your browser and automatically open the corresponding `.vue` file in VS Code or Cursor, jumping to the exact line. Supports Vite, Webpack, and Vue CLI projects.
 
-![Version](https://img.shields.io/badge/npm-0.1.0--beta.3-blue)
+![Version](https://img.shields.io/badge/npm-0.1.0--beta.4-blue)
 ![VS Code Extension](https://img.shields.io/badge/vsix-0.1.1-green)
 
 ---

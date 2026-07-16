@@ -48,7 +48,7 @@ body:
       value: |
         - OS: [e.g., Windows 11, macOS 14]
         - Node.js version: [e.g., 20.11.0]
-        - Package version: [e.g., 0.1.0-beta.3]
+        - Package version: [e.g., 0.1.0-beta.4]
         - Vue version: [e.g., 3.5.39]
         - Build tool: [Vite 6.4.3 / Webpack 5.x / Vue CLI 5.x]
         - IDE: [VS Code 1.95 / Cursor]
