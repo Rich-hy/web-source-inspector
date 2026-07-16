@@ -1,0 +1,70 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this issue!
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear description of what the bug is
+      placeholder: When I click an element, the IDE doesn't open the source file...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Install the package with `npm install -D web-source-inspector`
+        2. Run `npx web-source-inspector init`
+        3. Start dev server with `npm run dev`
+        4. Click an element in the browser
+        5. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen
+      placeholder: The .vue file should open in VS Code at the correct line
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Please provide your environment information
+      value: |
+        - OS: [e.g., Windows 11, macOS 14]
+        - Node.js version: [e.g., 20.11.0]
+        - Package version: [e.g., 0.1.0-beta.3]
+        - Vue version: [e.g., 3.5.39]
+        - Build tool: [Vite 6.4.3 / Webpack 5.x / Vue CLI 5.x]
+        - IDE: [VS Code 1.95 / Cursor]
+        - Browser: [Chrome 131]
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error logs or console output
+      description: Please paste any relevant error messages or console output
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Any other information that might be helpful

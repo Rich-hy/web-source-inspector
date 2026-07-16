@@ -2,6 +2,29 @@
   "name": "web-source-inspector",
   "version": "0.1.0-beta.3",
   "description": "Open Vue template sources from Vite and Webpack development pages in VS Code or Cursor.",
+  "keywords": [
+    "vue",
+    "vue2",
+    "vue3",
+    "vite",
+    "webpack",
+    "vue-cli",
+    "devtools",
+    "inspector",
+    "source-map",
+    "vscode",
+    "cursor",
+    "developer-tools"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rich-hy/web-source-inspector.git",
+    "directory": "packages/web-source-inspector"
+  },
+  "bugs": {
+    "url": "https://github.com/Rich-hy/web-source-inspector/issues"
+  },
+  "homepage": "https://github.com/Rich-hy/web-source-inspector#readme",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
